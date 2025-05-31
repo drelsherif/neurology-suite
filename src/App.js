@@ -1,62 +1,52 @@
+// src/App.js
 import React, { useState } from 'react';
-import Navigation from './components/layout/Navigation';
-import HomePage from './pages/HomePage';
-import ProviderSuite from './pages/ProviderSuite';
-import PatientSuite from './pages/PatientSuite';
-import SessionHistory from './pages/SessionHistory';
-import AvatarConcept from './pages/AvatarConcept';
 import FingerTapTest from './tests/neurological/FingerTapTest';
+// This is correct because from 'src/' you go into 'tests/', then 'neurological/', then 'FingerTapTest.js'
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('home');
+  const [currentPage, setCurrentPage] = useState('fingerTap'); // Start directly on finger tap for easy testing
 
-  const handleTestSelect = (testType) => {
-    // This will be used later when we create individual test components
-    console.log('Selected test:', testType);
-    setCurrentPage(testType);
-  };
-
-  const renderCurrentPage = () => {
-    switch (currentPage) {
+  const renderPage = () => {
+    switch(currentPage) {
+      case 'fingerTap':
+        return <FingerTapTest onBack={() => setCurrentPage('home')} />;
       case 'home':
-        return <HomePage onPageChange={setCurrentPage} />;
-      case 'providerSuite':
-        return <ProviderSuite onPageChange={setCurrentPage} onTestSelect={handleTestSelect} />;
-      case 'patientHomeSuite':
-        return <PatientSuite onPageChange={setCurrentPage} onTestSelect={handleTestSelect} />;
-      case 'sessionHistory':
-        return <SessionHistory onPageChange={setCurrentPage} />;
-      case 'avatarConcept':
-        return <AvatarConcept onPageChange={setCurrentPage} />;
-      case 'fingerTapSpeed':
-        return <FingerTapTest onPageChange={setCurrentPage} />;
-      default:
-        // For now, show a placeholder for individual tests
+        // Placeholder for HomePage or a test selection page
         return (
-          <div className="max-w-7xl mx-auto p-6">
-            <h1 className="text-3xl font-bold text-blue-300 mb-4">
-              {currentPage.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())} Test
-            </h1>
-            <p className="text-slate-300 mb-4">
-              This test component will be implemented next with MediaPipe integration.
-            </p>
-            <button 
-              onClick={() => setCurrentPage('home')}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+          <div style={{ textAlign: 'center', padding: '50px', fontFamily: 'Arial, sans-serif' }}>
+            <h1>Neurology Suite</h1>
+            <p style={{ fontSize: '1.1em', marginBottom: '25px' }}>Welcome! Select a test from the menu.</p>
+            <button
+              onClick={() => setCurrentPage('fingerTap')}
+              style={{
+                padding: '12px 25px',
+                fontSize: '1.2em',
+                cursor: 'pointer',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+              }}
             >
-              Back to Home
+              Go to Finger Tap Test
             </button>
+            {/* Add more test buttons here */}
+          </div>
+        );
+      default:
+        return (
+          <div style={{ textAlign: 'center', padding: '50px' }}>
+            <h1>Page Not Found</h1>
+            <button onClick={() => setCurrentPage('home')}>Go Home</button>
           </div>
         );
     }
   };
 
   return (
-    <div className="bg-slate-900 min-h-screen text-slate-100">
-      <Navigation currentPage={currentPage} onPageChange={setCurrentPage} />
-      <main>
-        {renderCurrentPage()}
-      </main>
+    <div className="App">
+      {renderPage()}
     </div>
   );
 }
