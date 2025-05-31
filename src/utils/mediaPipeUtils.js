@@ -1,10 +1,6 @@
 // src/utils/mediaPipeUtils.js
 
-// MediaPipe imports
-import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
-import { Camera } from '@mediapipe/camera_utils';
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
-
+// Remove the ES6 imports and use global MediaPipe instead
 class HandTracker {
   constructor() {
     this.hands = null;
@@ -12,30 +8,47 @@ class HandTracker {
     this.isInitialized = false;
     this.onResultsCallback = null;
     this.lastFingerTipY = null;
-    this.tapThreshold = 25; // pixels - sensitivity for tap detection
+    this.tapThreshold = 25;
     this.lastTapTime = 0;
-    this.minTapInterval = 150; // ms - minimum time between taps
+    this.minTapInterval = 150;
     this.onTapDetected = null;
     this.isTracking = false;
   }
 
   async initialize(videoElement, canvasElement, onResults) {
     try {
-      console.log('Initializing MediaPipe Hand Tracker...');
+      console.log('🔄 Initializing MediaPipe Hand Tracker...');
       this.onResultsCallback = onResults;
 
-      // Initialize MediaPipe Hands
-      this.hands = new Hands({
+      // Check if MediaPipe is loaded globally
+      if (typeof window.Hands === 'undefined') {
+        console.error('❌ MediaPipe not found. Loading from CDN...');
+        
+        // Try to load MediaPipe dynamically
+        await this.loadMediaPipeScripts();
+        
+        // Wait a bit for scripts to initialize
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (typeof window.Hands === 'undefined') {
+          throw new Error('MediaPipe failed to load from CDN');
+        }
+      }
+
+      console.log('✅ MediaPipe found, initializing Hands...');
+
+      // Initialize MediaPipe Hands using global window object
+      this.hands = new window.Hands({
         locateFile: (file) => {
           return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         }
       });
 
-      // Configure hand detection - optimized for finger tapping
+      // Configure hand detection
       this.hands.setOptions({
-        maxNumHands: 1, // Only track one hand at a time
-        modelComplexity: 1, // Balance between accuracy and speed
-        minDetectionConfidence: 0.8, // Higher confidence for better tracking
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.8,
         minTrackingConfidence: 0.7
       });
 
@@ -43,7 +56,7 @@ class HandTracker {
       this.hands.onResults((results) => this.onResults(results, canvasElement));
 
       // Initialize camera
-      this.camera = new Camera(videoElement, {
+      this.camera = new window.Camera(videoElement, {
         onFrame: async () => {
           if (this.hands && this.isTracking) {
             await this.hands.send({ image: videoElement });
@@ -54,68 +67,68 @@ class HandTracker {
       });
 
       this.isInitialized = true;
-      console.log('MediaPipe Hand Tracker initialized successfully');
+      console.log('✅ MediaPipe Hand Tracker initialized successfully');
       return true;
 
     } catch (error) {
-      console.error('MediaPipe initialization failed:', error);
+      console.error('❌ MediaPipe initialization failed:', error);
+      alert(`MediaPipe setup failed: ${error.message}\n\nPlease check your internet connection and try again.`);
       return false;
     }
   }
 
-  async start() {
-    if (this.camera && this.isInitialized) {
-      this.isTracking = true;
-      await this.camera.start();
-      console.log('Hand tracking started');
-      return true;
-    }
-    return false;
-  }
+  async loadMediaPipeScripts() {
+    const scripts = [
+      'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js'
+    ];
 
-  stop() {
-    this.isTracking = false;
-    if (this.camera) {
-      this.camera.stop();
-      console.log('Hand tracking stopped');
+    for (const src of scripts) {
+      await this.loadScript(src);
     }
   }
 
+  loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  // ... rest of your methods stay the same
   onResults(results, canvasElement) {
     const canvasCtx = canvasElement.getContext('2d');
     
-    // Clear previous frame
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    
-    // Set canvas size to match video
     canvasElement.width = 640;
     canvasElement.height = 480;
     
-    // Draw the results
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
       const landmarks = results.multiHandLandmarks[0];
       
-      // Draw hand connections (skeleton)
-      drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+      // Use global drawing functions
+      window.drawConnectors(canvasCtx, landmarks, window.HAND_CONNECTIONS, {
         color: '#00FF00',
         lineWidth: 2
       });
       
-      // Draw all landmarks
-      drawLandmarks(canvasCtx, landmarks, {
+      window.drawLandmarks(canvasCtx, landmarks, {
         color: '#FF0000',
         lineWidth: 1,
         radius: 3
       });
 
-      // Highlight index finger tip (landmark 8) with special emphasis
+      // Highlight index finger tip
       const indexTip = landmarks[8];
       if (indexTip) {
         const x = indexTip.x * canvasElement.width;
         const y = indexTip.y * canvasElement.height;
         
-        // Draw large cyan circle for index finger tip
         canvasCtx.beginPath();
         canvasCtx.arc(x, y, 12, 0, 2 * Math.PI);
         canvasCtx.fillStyle = '#00FFFF';
@@ -124,17 +137,14 @@ class HandTracker {
         canvasCtx.lineWidth = 3;
         canvasCtx.stroke();
         
-        // Add text label
         canvasCtx.fillStyle = '#FFFFFF';
         canvasCtx.font = 'bold 12px Arial';
         canvasCtx.fillText('TAP HERE', x - 30, y - 20);
       }
 
-      // Detect tapping motion
       this.detectTap(landmarks, canvasElement);
       
     } else {
-      // Draw "no hand detected" message
       canvasCtx.fillStyle = '#FFFF00';
       canvasCtx.font = 'bold 16px Arial';
       canvasCtx.textAlign = 'center';
@@ -144,11 +154,12 @@ class HandTracker {
     
     canvasCtx.restore();
 
-    // Call external callback if provided
     if (this.onResultsCallback) {
       this.onResultsCallback(results);
     }
   }
+
+
 
   detectTap(landmarks, canvasElement) {
     const indexTip = landmarks[8]; // Index finger tip
