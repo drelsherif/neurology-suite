@@ -324,29 +324,56 @@ export default function FingerTapTest({ onBack }) {
   // Start camera when test begins
   const startCamera = async () => {
     try {
+      console.log('🎥 Starting camera...');
+      
       if (!handsRef.current) {
         throw new Error('MediaPipe not ready');
       }
 
-      // Create camera instance
+      if (!videoRef.current) {
+        throw new Error('Video element not ready - please wait a moment and try again');
+      }
+
+      if (!canvasRef.current) {
+        throw new Error('Canvas element not ready - please wait a moment and try again');
+      }
+
+      // Wait a bit for elements to be fully mounted
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Double-check elements are still available
+      if (!videoRef.current || !canvasRef.current) {
+        throw new Error('Video/Canvas elements became unavailable');
+      }
+
+      console.log('📹 Creating camera instance...');
+      
+      // Create camera instance with error handling
       cameraRef.current = new window.Camera(videoRef.current, {
         onFrame: async () => {
-          if (videoRef.current && handsRef.current) {
-            await handsRef.current.send({ image: videoRef.current });
+          try {
+            if (videoRef.current && handsRef.current) {
+              await handsRef.current.send({ image: videoRef.current });
+            }
+          } catch (frameError) {
+            console.warn('Frame processing error:', frameError);
           }
         },
         width: 640,
         height: 480,
       });
 
+      console.log('▶️ Starting camera stream...');
       await cameraRef.current.start();
+      
       setCameraReady(true);
       setMediaPipeReady(true);
-      console.log('✅ Camera started');
+      console.log('✅ Camera started successfully');
       return true;
+      
     } catch (error) {
       console.error('❌ Camera start failed:', error);
-      throw error;
+      throw new Error(`Camera failed to start: ${error.message}`);
     }
   };
 
@@ -379,9 +406,19 @@ export default function FingerTapTest({ onBack }) {
     try {
       console.log('🏁 Starting test...');
       
+      // Check if we're in the right phase
+      if (testPhase !== 'instructions') {
+        console.log('Setting test phase to testing...');
+        setTestPhase('testing');
+      }
+      
       adjustSensitivity(sensitivity);
       
+      // Wait a moment for the phase transition and DOM updates
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       // Start camera (MediaPipe already loaded)
+      console.log('📷 Attempting to start camera...');
       await startCamera();
       
       setTapCount(0);
@@ -396,7 +433,14 @@ export default function FingerTapTest({ onBack }) {
       console.log('⏰ Test started - start tapping!');
     } catch (error) {
       console.error('❌ Test start failed:', error);
-      alert(`Test failed to start: ${error.message}`);
+      
+      // Reset states on failure
+      setIsRunning(false);
+      setCameraReady(false);
+      setMediaPipeReady(false);
+      
+      // Show user-friendly error
+      alert(`Test failed to start: ${error.message}\n\nTry refreshing the page if the problem persists.`);
     }
   };
 
