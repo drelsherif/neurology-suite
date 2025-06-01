@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
+import { Camera } from '@mediapipe/camera_utils';
 
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
@@ -14,11 +15,7 @@ export default function EyeTrackingTest() {
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext('2d');
 
-    const faceMesh = new FaceMesh({
-      locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-    });
-
+    const faceMesh = new FaceMesh();
     faceMesh.setOptions({
       selfieMode: true,
       maxNumFaces: 1,
@@ -35,26 +32,24 @@ export default function EyeTrackingTest() {
         setFaceDetected(true);
 
         const landmarks = results.multiFaceLandmarks[0];
-
-        for (let i = 0; i < landmarks.length; i++) {
-          const pt = landmarks[i];
+        landmarks.forEach(pt => {
           canvasCtx.beginPath();
           canvasCtx.arc(pt.x * canvasElement.width, pt.y * canvasElement.height, 2, 0, 2 * Math.PI);
           canvasCtx.fillStyle = 'lime';
           canvasCtx.fill();
-        }
+        });
 
-        const leftEye = landmarks[468];
-        const rightEye = landmarks[473];
-        const eyeMidX = (leftEye.x + rightEye.x) / 2;
+        // Simple gaze direction estimation
+        const leftIris = landmarks[468];   // Left iris center
+        const rightIris = landmarks[473];  // Right iris center
+        const avgX = (leftIris.x + rightIris.x) / 2;
 
         let direction = 'center';
-        if (eyeMidX < 0.45) direction = 'right';
-        else if (eyeMidX > 0.55) direction = 'left';
+        if (avgX < 0.45) direction = 'right';
+        else if (avgX > 0.55) direction = 'left';
 
         setGazeDirection(direction);
-        setGazeHistory(prev => [...prev.slice(-100), direction]); // store last 100
-
+        setGazeHistory(prev => [...prev.slice(-100), direction]);
       } else {
         setFaceDetected(false);
       }
@@ -63,33 +58,18 @@ export default function EyeTrackingTest() {
       setLoading(false);
     });
 
-    const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: 640, height: 480 }
-        });
-        videoElement.srcObject = stream;
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await faceMesh.send({ image: videoElement });
+      },
+      width: 640,
+      height: 480,
+    });
 
-        videoElement.onloadedmetadata = () => {
-          videoElement.play();
-
-          const detectFrame = async () => {
-            await faceMesh.send({ image: videoElement });
-            requestAnimationFrame(detectFrame);
-          };
-
-          detectFrame();
-        };
-      } catch (err) {
-        console.error('Camera initialization failed:', err);
-      }
-    };
-
-    startCamera();
+    camera.start();
 
     return () => {
-      const tracks = videoElement?.srcObject?.getTracks();
-      tracks?.forEach((track) => track.stop());
+      camera.stop();
     };
   }, []);
 
