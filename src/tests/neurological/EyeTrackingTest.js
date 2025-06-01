@@ -16,9 +16,9 @@ export default function EyeTrackingTest() {
     const canvasCtx = canvasElement.getContext('2d');
 
     const faceMesh = new FaceMesh({
-  locateFile: (file) =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
-});
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
+    });
 
     faceMesh.setOptions({
       selfieMode: true,
@@ -43,9 +43,8 @@ export default function EyeTrackingTest() {
           canvasCtx.fill();
         });
 
-        // Simple gaze direction estimation
-        const leftIris = landmarks[468];   // Left iris center
-        const rightIris = landmarks[473];  // Right iris center
+        const leftIris = landmarks[468];
+        const rightIris = landmarks[473];
         const avgX = (leftIris.x + rightIris.x) / 2;
 
         let direction = 'center';
@@ -77,6 +76,8 @@ export default function EyeTrackingTest() {
     };
   }, []);
 
+  const countGaze = (target) => gazeHistory.filter(g => g === target).length;
+
   const renderGazeGraph = () => {
     const width = 300;
     const height = 100;
@@ -104,6 +105,15 @@ export default function EyeTrackingTest() {
     );
   };
 
+  const renderGazeStats = () => (
+    <div className="mt-2 text-sm text-white bg-black/60 p-2 rounded">
+      <p><strong>Gaze Analysis</strong></p>
+      <p>Left: {countGaze('left')}</p>
+      <p>Center: {countGaze('center')}</p>
+      <p>Right: {countGaze('right')}</p>
+    </div>
+  );
+
   return (
     <div className="relative w-full max-w-lg mx-auto mt-6 aspect-video bg-black rounded overflow-hidden">
       <video
@@ -123,8 +133,9 @@ export default function EyeTrackingTest() {
         {loading ? 'Loading FaceMesh...' : faceDetected ? 'Face Detected ✓' : 'Face Not Detected ✗'}<br />
         Gaze: {gazeDirection}
       </div>
-      <div className="absolute bottom-[-110px] left-0 right-0 z-30 flex justify-center">
+      <div className="absolute bottom-[-120px] left-0 right-0 z-30 flex flex-col items-center">
         {renderGazeGraph()}
+        {renderGazeStats()}
       </div>
     </div>
   );
