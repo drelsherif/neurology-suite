@@ -4,10 +4,10 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const targetPosRef = useRef({ x: 0.5, y: 0.5 });
   const [leftIris, setLeftIris] = useState({ x: 0, y: 0 });
   const [rightIris, setRightIris] = useState({ x: 0, y: 0 });
   const [faceDetected, setFaceDetected] = useState(false);
-  const [targetPos, setTargetPos] = useState({ x: 0.5, y: 0.5 });
   const [trackingData, setTrackingData] = useState([]);
   const [results, setResults] = useState(null);
   const [testRunning, setTestRunning] = useState(false);
@@ -71,8 +71,8 @@ export default function EyeTrackingTest() {
 
       // Draw moving target
       if (testRunning) {
-        const dotX = targetPos.x * canvas.width;
-        const dotY = targetPos.y * canvas.height;
+        const dotX = targetPosRef.current.x * canvas.width;
+        const dotY = targetPosRef.current.y * canvas.height;
         ctx.beginPath();
         ctx.arc(dotX, dotY, 6, 0, 2 * Math.PI);
         ctx.fillStyle = 'yellow';
@@ -82,7 +82,7 @@ export default function EyeTrackingTest() {
         setTrackingData(prev => [...prev, {
           left: leftOffset,
           right: rightOffset,
-          target: { ...targetPos },
+          target: { ...targetPosRef.current },
           timestamp: Date.now()
         }]);
       }
@@ -106,7 +106,7 @@ export default function EyeTrackingTest() {
     };
 
     startCamera();
-  }, [targetPos, testRunning]);
+  }, [testRunning]);
 
   const runTest = () => {
     setTrackingData([]);
@@ -125,10 +125,10 @@ export default function EyeTrackingTest() {
         return;
       }
       angle += 0.05;
-      setTargetPos({
+      targetPosRef.current = {
         x: 0.5 + 0.3 * Math.cos(angle),
         y: 0.5 + 0.2 * Math.sin(angle),
-      });
+      };
       requestAnimationFrame(move);
     };
     move();
