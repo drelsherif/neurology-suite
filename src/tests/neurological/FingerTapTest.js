@@ -406,26 +406,18 @@ export default function FingerTapTest({ onBack }) {
     try {
       console.log('🏁 Starting test...');
       
-      // Check if we're in the right phase
-      if (testPhase !== 'instructions') {
-        console.log('Setting test phase to testing...');
-        setTestPhase('testing');
-      }
-      
       adjustSensitivity(sensitivity);
       
-      // Wait a moment for the phase transition and DOM updates
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Start camera (MediaPipe already loaded)
-      console.log('📷 Attempting to start camera...');
+      // Start camera first (elements are already mounted)
+      console.log('📷 Starting camera with existing elements...');
       await startCamera();
       
+      // Then switch to testing phase and start the test
       setTapCount(0);
       setTapTimes([]);
       setTimeRemaining(10);
-      setIsRunning(true);
       setTestPhase('testing');
+      setIsRunning(true);
       
       lastFingerTipY.current = null;
       lastTapTime.current = 0;
@@ -787,6 +779,37 @@ export default function FingerTapTest({ onBack }) {
           <p className="text-lg text-gray-600">AI will automatically detect your finger taps</p>
         </div>
 
+        {/* Video and Canvas - Now on instructions screen */}
+        <div className="relative bg-gray-900 rounded-lg overflow-hidden">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-64 object-cover"
+            style={{ transform: 'scaleX(-1)' }}
+          />
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={480}
+            className="absolute top-0 left-0 w-full h-full"
+            style={{ transform: 'scaleX(-1)' }}
+          />
+          
+          {/* Camera preview overlay */}
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+            <div className="text-center text-white p-6">
+              <div className="text-4xl mb-4">📹</div>
+              <p className="text-lg font-semibold mb-2">Camera Preview</p>
+              <p className="text-sm text-gray-300">Position your {currentHand} hand here</p>
+              {cameraReady && (
+                <div className="text-green-400 text-sm mt-2">✅ Camera Ready</div>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white border border-gray-200 p-6 rounded-lg">
             <h3 className="text-lg font-semibold text-blue-600 mb-4">Hand Position</h3>
@@ -845,7 +868,7 @@ export default function FingerTapTest({ onBack }) {
           <p className="text-lg text-gray-600">Tap naturally - AI will detect automatically</p>
         </div>
 
-        {/* Camera Feed */}
+        {/* Camera Feed - Reuse same elements */}
         <div className="relative bg-gray-900 rounded-lg overflow-hidden">
           <video
             ref={videoRef}
