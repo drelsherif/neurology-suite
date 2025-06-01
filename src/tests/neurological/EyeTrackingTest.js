@@ -3,7 +3,6 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { getOrCreateCamera, stopCamera } from '../../services/mediapipe/MediaPipeService';
 import { getFaceMesh } from '../../services/mediapipe/FaceMeshService';
 
-
 export default function EyeMovementTest({ onBack }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -178,27 +177,23 @@ export default function EyeMovementTest({ onBack }) {
   };
 
   const initializeMediaPipe = async () => {
-    try {
-      console.log('Initializing MediaPipe Face Mesh...');
-      
-      if (!window.FaceMesh) {
-        throw new Error('FaceMesh not available on window object');
-      }
-      
-      const faceMesh = getFaceMesh();
-    faceMeshRef.current = faceMesh;
-    
+  try {
+    console.log('Initializing MediaPipe Face Mesh...');
 
-    
-      faceMeshRef.current.onResults(onResults);
-      addPreloadLog('✅ Face Mesh configured with low thresholds');
-      console.log('MediaPipe Face Mesh initialized successfully');
-      return true;
-    } catch (error) {
-      console.error('MediaPipe initialization error:', error);
-      throw new Error(`Face Mesh initialization failed: ${error.message}`);
-    }
-  };
+    const faceMesh = getFaceMesh(); // uses singleton with options and locateFile
+    faceMeshRef.current = faceMesh;
+
+    faceMeshRef.current.onResults(onResults);
+
+    addPreloadLog('✅ Face Mesh configured with default settings');
+    console.log('MediaPipe Face Mesh initialized successfully');
+    return true;
+  } catch (error) {
+    console.error('MediaPipe initialization error:', error);
+    throw new Error(`Face Mesh initialization failed: ${error.message}`);
+  }
+};
+
 
   // Calculate eye metrics from landmarks
   const calculateEyeMetrics = useCallback((landmarks) => {
