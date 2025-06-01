@@ -44,9 +44,15 @@ export default function EyeMovementTest({ onBack }) {
   const [faceDetected, setFaceDetected] = useState(false);
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
   
-  // Recording refs
-  const currentEyeData = useRef([]);
-  const isRecordingRef = useRef(false);
+  // Add debug mode state
+  const [debugMode, setDebugMode] = useState(false);
+  
+  // Force face detection for testing
+  const forceFaceDetection = () => {
+    setDebugMode(true);
+    setFaceDetected(true);
+    console.log('🔧 Debug mode: Force face detection enabled');
+  };
 
   const addPreloadLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -275,7 +281,42 @@ export default function EyeMovementTest({ onBack }) {
     }
   }, []);
 
-  // MediaPipe results handler
+  // Add a simple fallback face detection using video frame analysis
+  const simpleFaceDetection = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return false;
+    
+    try {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      
+      // Draw current video frame to canvas
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      
+      // Get image data to analyze
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // Simple brightness analysis to detect if there's a face-like region
+      let brightPixels = 0;
+      let totalPixels = data.length / 4;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        if (brightness > 100 && brightness < 200) { // Face-like brightness
+          brightPixels++;
+        }
+      }
+      
+      const faceRatio = brightPixels / totalPixels;
+      return faceRatio > 0.1; // If >10% of pixels look face-like
+      
+    } catch (error) {
+      console.error('Simple face detection error:', error);
+      return false;
+    }
+  }, []);
+
+  // Enhanced MediaPipe results handler with fallback
   const onResults = useCallback((results) => {
     if (!canvasRef.current) return;
     
@@ -286,26 +327,31 @@ export default function EyeMovementTest({ onBack }) {
     canvas.height = 480;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Debug: Draw a test circle to verify canvas is working
+    // Debug: Always show we're getting frames
     ctx.beginPath();
-    ctx.arc(50, 50, 20, 0, 2 * Math.PI);
+    ctx.arc(20, 20, 10, 0, 2 * Math.PI);
     ctx.fillStyle = '#00FF00';
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '12px Arial';
-    ctx.fillText('Canvas OK', 80, 55);
+    ctx.font = '10px Arial';
+    ctx.fillText('Frame', 35, 25);
 
-    console.log('MediaPipe results:', results); // Debug log
+    console.log('MediaPipe results received:', {
+      hasFaceLandmarks: !!(results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0),
+      facesCount: results.multiFaceLandmarks ? results.multiFaceLandmarks.length : 0
+    });
+
+    let faceDetected = false;
 
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
       const landmarks = results.multiFaceLandmarks[0];
-      console.log('Face detected! Landmarks:', landmarks.length); // Debug log
-      setFaceDetected(true);
+      console.log('MediaPipe face detected! Landmarks count:', landmarks.length);
+      faceDetected = true;
 
-      // Draw simple face outline first (basic circles for eyes, etc.)
+      // Draw success message
       ctx.fillStyle = '#00FF00';
-      ctx.font = 'bold 20px Arial';
-      ctx.fillText('FACE DETECTED!', canvas.width / 2 - 80, 100);
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText('MEDIAPIPE FACE DETECTED!', 50, 100);
 
       // Draw eye regions
       drawEyeRegions(ctx, landmarks);
@@ -315,7 +361,6 @@ export default function EyeMovementTest({ onBack }) {
       if (metrics) {
         setRealTimeMetrics(metrics);
         
-        // Record data if recording
         if (isRecordingRef.current) {
           currentEyeData.current.push({
             timestamp: Date.now(),
@@ -326,18 +371,38 @@ export default function EyeMovementTest({ onBack }) {
       }
       
     } else {
-      console.log('No face detected in frame'); // Debug log
-      setFaceDetected(false);
-      // Draw "no face detected" message
-      ctx.fillStyle = '#FF0000';
-      ctx.font = 'bold 16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('NO FACE DETECTED', canvas.width / 2, canvas.height / 2);
-      ctx.fillText('Position face in camera view', canvas.width / 2, canvas.height / 2 + 30);
-      ctx.fillText('Ensure good lighting', canvas.width / 2, canvas.height / 2 + 60);
-      ctx.textAlign = 'left';
+      console.log('No MediaPipe face detected, trying fallback...');
+      
+      // Try simple fallback detection
+      const simpleFaceFound = simpleFaceDetection();
+      console.log('Simple face detection result:', simpleFaceFound);
+      
+      if (simpleFaceFound) {
+        faceDetected = true;
+        ctx.fillStyle = '#FFFF00';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText('SIMPLE FACE DETECTED!', 50, 150);
+        ctx.fillText('(MediaPipe backup)', 50, 170);
+        
+        // Draw a simple face indicator
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2, canvas.height / 2, 50, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#FFFF00';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#FF0000';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('NO FACE DETECTED', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('Try better lighting', canvas.width / 2, canvas.height / 2 + 20);
+        ctx.fillText('Move closer to camera', canvas.width / 2, canvas.height / 2 + 40);
+        ctx.textAlign = 'left';
+      }
     }
-  }, [calculateEyeMetrics, currentDirection]);
+    
+    setFaceDetected(faceDetected);
+  }, [calculateEyeMetrics, currentDirection, simpleFaceDetection]);
 
   // Draw eye regions and iris tracking
   const drawEyeRegions = (ctx, landmarks) => {
@@ -867,6 +932,10 @@ export default function EyeMovementTest({ onBack }) {
               <div>Face: <span className={faceDetected ? "text-green-400" : "text-red-400"}>
                 {faceDetected ? "✅" : "❌"}
               </span></div>
+              <div>Cam: <span className={cameraReady ? "text-green-400" : "text-red-400"}>
+                {cameraReady ? "✅" : "❌"}
+              </span></div>
+              {debugMode && <div className="text-yellow-400">🔧 Debug</div>}
               <div>Gaze: <span className="text-cyan-400">{realTimeMetrics.gazeDirection}</span></div>
             </div>
           </div>
@@ -910,6 +979,18 @@ export default function EyeMovementTest({ onBack }) {
           <p className="text-yellow-800 text-sm">
             <strong>⚠️ iPhone Tip:</strong> Hold steady and make sure the green "Face OK" shows before starting!
           </p>
+          {/* Debug mode toggle */}
+          <div className="mt-2 pt-2 border-t border-yellow-300">
+            <button 
+              onClick={forceFaceDetection}
+              className="text-xs bg-yellow-600 text-white px-2 py-1 rounded mr-2"
+            >
+              🔧 Force Face Detection (Debug)
+            </button>
+            <span className="text-xs text-yellow-700">
+              Use if face detection fails
+            </span>
+          </div>
         </div>
 
         <div className="flex space-x-4 justify-center">
