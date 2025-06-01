@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
-import { Camera } from '@mediapipe/camera_utils';
 
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
@@ -51,33 +50,38 @@ export default function EyeTrackingTest() {
 
       setIrisOffset({ x: offsetX, y: offsetY });
 
-      lm.forEach((pt) => {
-        ctx.beginPath();
-        ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 2, 0, 2 * Math.PI);
-        ctx.fillStyle = 'lime';
-        ctx.fill();
-      });
+      ctx.beginPath();
+      ctx.arc(iris.x * canvas.width, iris.y * canvas.height, 4, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'red';
+      ctx.stroke();
     });
 
-    const camera = new Camera(video, {
-      onFrame: async () => {
-        await faceMesh.send({ image: video });
-      },
-      width: 640,
-      height: 480,
-    });
-
-    video.onloadedmetadata = () => {
-      camera.start();
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          const detect = async () => {
+            await faceMesh.send({ image: video });
+            requestAnimationFrame(detect);
+          };
+          detect();
+        };
+      } catch (err) {
+        console.error('Camera error:', err);
+      }
     };
+
+    startCamera();
   }, []);
 
   return (
-    <div className="fixed inset-0 z-0 bg-black">
+    <div className="fixed inset-0 bg-black z-0">
       <video
         ref={videoRef}
-        width="640"
-        height="480"
+        width={640}
+        height={480}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-0"
         autoPlay
         playsInline
@@ -89,7 +93,7 @@ export default function EyeTrackingTest() {
         height={480}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none"
       />
-      <div className="absolute top-2 left-2 z-20 bg-white/80 text-black text-sm p-2 rounded">
+      <div className="absolute top-2 left-2 z-20 text-sm text-white bg-black/70 p-2 rounded">
         Face: {faceDetected ? '✓' : '✗'}<br />
         x: {irisOffset.x.toFixed(2)}, y: {irisOffset.y.toFixed(2)}
       </div>
