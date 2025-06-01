@@ -1554,7 +1554,7 @@
   resolved "https://registry.npmjs.org/@mediapipe/drawing_utils/-/drawing_utils-0.3.1620080201.tgz"
   integrity sha512-hH3qHp4O5uUdSuyVqZTV78MKih0iKVYyuowXPqNzAQrAP1TkBPXqbBkkLYymu1t0FbrFhuKI3bk/CI91YpdpiQ==
 
-"@mediapipe/face_mesh@^0.4.1633559619":
+"@mediapipe/face_mesh@0.4.1633559619":
   version "0.4.1633559619"
   resolved "https://registry.yarnpkg.com/@mediapipe/face_mesh/-/face_mesh-0.4.1633559619.tgz#f917e4448e25bc375a905d1d910f1bca450c5e23"
   integrity sha512-Vc8cdjxS5+O2gnjWH9KncYpUCVXT0h714KlWAsyqJvJbIgUJBqpppbIx8yWcAzBDxm/5cYSuBI5p5ySIPxzcEg==
