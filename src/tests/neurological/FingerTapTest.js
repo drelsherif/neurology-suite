@@ -202,7 +202,7 @@ export default function FingerTapTest({ onBack }) {
 
   // Tap detection logic
   const detectTap = useCallback((landmarks) => {
-    if (!isRunning) return;
+    if (!isRunning || !canvasRef.current) return;
     
     const indexTip = landmarks[8];
     const indexDip = landmarks[7];
@@ -220,14 +220,20 @@ export default function FingerTapTest({ onBack }) {
       const movement = tipY - lastFingerTipY.current;
       const currentTime = Date.now();
       
+      console.log(`👆 Finger movement: ${movement.toFixed(1)}px, threshold: ${tapThreshold.current}px, curvature: ${fingerCurvature.toFixed(1)}`);
+      
       if (movement > tapThreshold.current && 
           fingerCurvature < 40 && 
           currentTime - lastTapTime.current > minTapInterval.current) {
         
         lastTapTime.current = currentTime;
         
-        console.log('👆 Tap detected!');
-        setTapCount(prev => prev + 1);
+        console.log('🎉 TAP DETECTED! Count:', tapCount + 1);
+        setTapCount(prev => {
+          const newCount = prev + 1;
+          console.log('📊 Updated tap count:', newCount);
+          return newCount;
+        });
         setTapTimes(prev => [...prev, currentTime]);
         
         // Visual feedback
@@ -236,10 +242,12 @@ export default function FingerTapTest({ onBack }) {
     }
     
     lastFingerTipY.current = tipY;
-  }, [isRunning]);
+  }, [isRunning, tapCount]);
 
   const flashFingerTip = (indexTip) => {
     if (!canvasRef.current) return;
+    
+    console.log('💥 Flash effect triggered!');
     
     const ctx = canvasRef.current.getContext('2d');
     const x = indexTip.x * canvasRef.current.width;
@@ -247,10 +255,18 @@ export default function FingerTapTest({ onBack }) {
     
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, 25, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+    ctx.arc(x, y, 30, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
     ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 0, 0, 1)';
+    ctx.lineWidth = 5;
+    ctx.stroke();
     ctx.restore();
+    
+    // Clear flash after delay - but it will be cleared on next frame anyway
+    setTimeout(() => {
+      console.log('Flash effect cleared');
+    }, 100);
   };
 
   // MediaPipe results handler
@@ -407,20 +423,27 @@ export default function FingerTapTest({ onBack }) {
       console.log('🏁 Starting test...');
       
       adjustSensitivity(sensitivity);
+      console.log(`🎯 Sensitivity set: threshold=${tapThreshold.current}, interval=${minTapInterval.current}`);
       
       // Start camera first (elements are already mounted)
       console.log('📷 Starting camera with existing elements...');
       await startCamera();
+      
+      // Reset tracking values
+      lastFingerTipY.current = null;
+      lastTapTime.current = 0;
       
       // Then switch to testing phase and start the test
       setTapCount(0);
       setTapTimes([]);
       setTimeRemaining(10);
       setTestPhase('testing');
-      setIsRunning(true);
       
-      lastFingerTipY.current = null;
-      lastTapTime.current = 0;
+      // IMPORTANT: Set isRunning AFTER phase change
+      setTimeout(() => {
+        setIsRunning(true);
+        console.log('✅ Test is now running - tap detection active!');
+      }, 100);
       
       console.log('⏰ Test started - start tapping!');
     } catch (error) {
@@ -911,12 +934,15 @@ export default function FingerTapTest({ onBack }) {
             )}
           </div>
           
-          {/* Performance overlay */}
-          <div className="absolute top-4 left-4 bg-black/80 px-4 py-3 rounded text-white">
-            <div className="text-3xl font-bold">{tapCount}</div>
+          {/* Performance overlay - Enhanced */}
+          <div className="absolute top-4 left-4 bg-black/90 px-4 py-3 rounded text-white">
+            <div className="text-3xl font-bold text-yellow-400">{tapCount}</div>
             <div className="text-sm">taps detected</div>
             <div className="text-blue-400 text-sm">
               {(tapCount / Math.max(10 - timeRemaining, 1)).toFixed(1)} taps/sec
+            </div>
+            <div className="text-xs text-gray-400 mt-1">
+              Running: {isRunning ? 'YES' : 'NO'}
             </div>
             {timeRemaining <= 3 && timeRemaining > 0 && (
               <div className="text-red-400 text-xs font-bold animate-pulse mt-1">
