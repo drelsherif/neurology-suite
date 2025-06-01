@@ -3,6 +3,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 export default function FingerTapTest({ onBack }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const overlayCanvasRef = useRef(null); // Separate canvas for flash effects
   const handsRef = useRef(null);
   const cameraRef = useRef(null);
   
@@ -36,12 +37,11 @@ export default function FingerTapTest({ onBack }) {
   // Settings
   const [sensitivity, setSensitivity] = useState('normal');
   
-  // Tap detection refs
+  // Tap detection refs - stable across re-renders
   const lastFingerTipY = useRef(null);
   const lastTapTime = useRef(0);
-  const tapThreshold = useRef(25);
-  const minTapInterval = useRef(150);
-  const tapCountRef = useRef(0); // Add tap count ref to avoid state issues
+  const tapCountRef = useRef(0);
+  const isRunningRef = useRef(false);
 
   const addPreloadLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -60,15 +60,12 @@ export default function FingerTapTest({ onBack }) {
       setIsPreloading(true);
       setPreloadError(null);
 
-      // Step 1: Request camera permissions immediately
       addPreloadLog('📷 Requesting camera permissions...');
       await requestCameraPermissions();
       
-      // Step 2: Load MediaPipe scripts
       addPreloadLog('📦 Loading MediaPipe scripts...');
       await loadMediaPipeScripts();
       
-      // Step 3: Initialize MediaPipe (but don't start camera yet)
       addPreloadLog('🤖 Pre-initializing MediaPipe...');
       await initializeMediaPipe();
       
@@ -99,7 +96,6 @@ export default function FingerTapTest({ onBack }) {
       addPreloadLog('✅ Camera permission granted');
       setCameraPermissionGranted(true);
       
-      // Stop the test stream - we just wanted permission
       stream.getTracks().forEach(track => track.stop());
       return true;
     } catch (error) {
@@ -132,7 +128,6 @@ export default function FingerTapTest({ onBack }) {
       }
     }
     
-    // Wait for MediaPipe to be available
     let attempts = 0;
     while (typeof window.Hands === 'undefined' && attempts < 50) {
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -162,7 +157,6 @@ export default function FingerTapTest({ onBack }) {
 
   const initializeMediaPipe = async () => {
     try {
-      // Pre-create MediaPipe instance (but don't start camera)
       handsRef.current = new window.Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
       });
@@ -174,7 +168,6 @@ export default function FingerTapTest({ onBack }) {
         minTrackingConfidence: 0.5,
       });
 
-      // Set up results callback (will be used later)
       handsRef.current.onResults(onResults);
 
       addPreloadLog('✅ MediaPipe pre-initialized');
@@ -184,126 +177,71 @@ export default function FingerTapTest({ onBack }) {
     }
   };
 
-  // Adjust sensitivity - iPhone/Mobile optimized
-  const adjustSensitivity = useCallback((sens) => {
-    switch (sens) {
-      case 'low':
-        tapThreshold.current = 8; // Very sensitive for iPhone
-        minTapInterval.current = 200;
-        break;
-      case 'high':
-        tapThreshold.current = 3; // Extremely sensitive
-        minTapInterval.current = 100;
-        break;
-      default: // normal
-        tapThreshold.current = 5; // Much more sensitive than before
-        minTapInterval.current = 150;
-    }
-    console.log(`🎯 Mobile sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
-  }, []);
-
-  // Fixed tap detection - prevent callback recreation issues
+  // PERFECT tap detection - no interference with MediaPipe
   const detectTap = useCallback((landmarks) => {
-    console.log('🔍 detectTap called at', new Date().toLocaleTimeString());
-    
-    if (!canvasRef.current) {
-      console.log('❌ No canvas');
-      return;
-    }
+    if (!isRunningRef.current) return;
     
     const indexTip = landmarks[8];
-    if (!indexTip) {
-      console.log('❌ No index tip');
-      return;
-    }
+    if (!indexTip || !canvasRef.current) return;
 
     const tipY = indexTip.y * canvasRef.current.height;
-    console.log('📍 Current tipY:', tipY.toFixed(1));
     
     if (lastFingerTipY.current !== null) {
       const movement = Math.abs(tipY - lastFingerTipY.current);
-      console.log(`📏 Movement: ${movement.toFixed(1)}px`);
       
-      // If you're seeing 150px changes, let's catch them!
-      if (movement > 50) {
+      // Perfect threshold for iPhone
+      if (movement > 30) {
         const currentTime = Date.now();
-        const timeSinceLastTap = currentTime - lastTapTime.current;
         
-        console.log(`⏰ Time since last tap: ${timeSinceLastTap}ms`);
-        
-        // Very short interval to allow multiple detections
-        if (timeSinceLastTap > 50) { // Very short interval
+        if (currentTime - lastTapTime.current > 300) { // Prevent double-counting
           lastTapTime.current = currentTime;
+          tapCountRef.current++;
           
-          console.log('🎉🎉🎉 BIG MOVEMENT DETECTED!', movement.toFixed(1), 'px');
+          console.log(`🎉 TAP ${tapCountRef.current}! Movement: ${movement.toFixed(1)}px`);
           
-          // Use a ref to avoid state update issues
-          tapCountRef.current = (tapCountRef.current || 0) + 1;
-          
-          // Force state update
+          // Update state without breaking MediaPipe
           setTapCount(tapCountRef.current);
+          setTapTimes(prev => [...prev, currentTime]);
           
-          console.log('🔥 TAP COUNT UPDATED TO:', tapCountRef.current);
-          alert(`TAP ${tapCountRef.current} DETECTED! Movement: ${movement.toFixed(1)}px`);
-          
-          // Flash
-          flashFingerTip(indexTip);
-        } else {
-          console.log('⏳ Too soon since last tap');
+          // Non-interfering visual feedback
+          showFlashEffect(indexTip);
         }
-      } else {
-        console.log('📏 Movement too small:', movement.toFixed(1));
       }
-    } else {
-      console.log('📍 First position recorded');
     }
     
     lastFingerTipY.current = tipY;
-  }, []); // NO DEPENDENCIES to prevent recreation
+  }, []); // Zero dependencies = stable callback
 
-  const flashFingerTip = (indexTip) => {
-    console.log('💥💥💥 FLASH EFFECT STARTING!');
+  // Non-interfering flash effect using separate canvas
+  const showFlashEffect = (indexTip) => {
+    if (!overlayCanvasRef.current) return;
     
-    if (!canvasRef.current) {
-      console.log('❌ No canvas for flash');
-      return;
-    }
+    const canvas = overlayCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const x = indexTip.x * canvas.width;
+    const y = indexTip.y * canvas.height;
     
-    const ctx = canvasRef.current.getContext('2d');
-    const x = indexTip.x * canvasRef.current.width;
-    const y = indexTip.y * canvasRef.current.height;
+    // Clear previous flash
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    console.log(`🎨 Drawing flash at ${x.toFixed(1)}, ${y.toFixed(1)}`);
-    
-    // MASSIVE flash for iPhone
+    // Draw flash
     ctx.save();
-    
-    // Yellow center
     ctx.beginPath();
-    ctx.arc(x, y, 60, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+    ctx.arc(x, y, 50, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
     ctx.fill();
-    
-    // Red ring
-    ctx.beginPath();
-    ctx.arc(x, y, 80, 0, 2 * Math.PI);
     ctx.strokeStyle = 'rgba(255, 0, 0, 1)';
-    ctx.lineWidth = 10;
+    ctx.lineWidth = 5;
     ctx.stroke();
-    
-    // Green outer ring
-    ctx.beginPath();
-    ctx.arc(x, y, 100, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(0, 255, 0, 1)';
-    ctx.lineWidth = 8;
-    ctx.stroke();
-    
     ctx.restore();
     
-    console.log('✅ Flash drawn successfully');
+    // Auto-clear flash
+    setTimeout(() => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }, 200);
   };
 
-  // MediaPipe results handler
+  // MediaPipe results handler - clean and minimal
   const onResults = useCallback((results) => {
     if (!canvasRef.current) return;
     
@@ -356,7 +294,7 @@ export default function FingerTapTest({ onBack }) {
         ctx.fillText('TAP HERE', x - 35, y - 25);
       }
 
-      // Detect taps
+      // Detect taps without interfering with rendering
       detectTap(landmarks);
       
     } else {
@@ -371,59 +309,30 @@ export default function FingerTapTest({ onBack }) {
     }
   }, [detectTap]);
 
-  // Start camera when test begins
+  // Start camera
   const startCamera = async () => {
     try {
-      console.log('🎥 Starting camera...');
-      
       if (!handsRef.current) {
         throw new Error('MediaPipe not ready');
       }
 
-      if (!videoRef.current) {
-        throw new Error('Video element not ready - please wait a moment and try again');
-      }
-
-      if (!canvasRef.current) {
-        throw new Error('Canvas element not ready - please wait a moment and try again');
-      }
-
-      // Wait a bit for elements to be fully mounted
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Double-check elements are still available
-      if (!videoRef.current || !canvasRef.current) {
-        throw new Error('Video/Canvas elements became unavailable');
-      }
-
-      console.log('📹 Creating camera instance...');
-      
-      // Create camera instance with error handling
       cameraRef.current = new window.Camera(videoRef.current, {
         onFrame: async () => {
-          try {
-            if (videoRef.current && handsRef.current) {
-              await handsRef.current.send({ image: videoRef.current });
-            }
-          } catch (frameError) {
-            console.warn('Frame processing error:', frameError);
+          if (videoRef.current && handsRef.current) {
+            await handsRef.current.send({ image: videoRef.current });
           }
         },
         width: 640,
         height: 480,
       });
 
-      console.log('▶️ Starting camera stream...');
       await cameraRef.current.start();
-      
       setCameraReady(true);
       setMediaPipeReady(true);
-      console.log('✅ Camera started successfully');
       return true;
-      
     } catch (error) {
       console.error('❌ Camera start failed:', error);
-      throw new Error(`Camera failed to start: ${error.message}`);
+      throw error;
     }
   };
 
@@ -452,45 +361,32 @@ export default function FingerTapTest({ onBack }) {
     return () => clearInterval(interval);
   }, [isRunning, timeRemaining]);
 
+  // Sync isRunning state with ref
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
   const startTest = async () => {
     try {
       console.log('🏁 Starting test...');
       
-      adjustSensitivity(sensitivity);
-      console.log(`🎯 Sensitivity set: threshold=${tapThreshold.current}, interval=${minTapInterval.current}`);
-      
-      // Start camera first (elements are already mounted)
-      console.log('📷 Starting camera with existing elements...');
       await startCamera();
       
-      // Reset ALL tracking values
+      // Reset everything
       lastFingerTipY.current = null;
       lastTapTime.current = 0;
-      tapCountRef.current = 0; // Reset ref counter
+      tapCountRef.current = 0;
       
-      // Then switch to testing phase and start the test
       setTapCount(0);
       setTapTimes([]);
       setTimeRemaining(10);
       setTestPhase('testing');
+      setIsRunning(true);
       
-      // IMPORTANT: Set isRunning AFTER phase change
-      setTimeout(() => {
-        setIsRunning(true);
-        console.log('✅ Test is now running - tap detection active!');
-      }, 100);
-      
-      console.log('⏰ Test started - start tapping!');
+      console.log('⏰ Test started - tap detection active!');
     } catch (error) {
       console.error('❌ Test start failed:', error);
-      
-      // Reset states on failure
-      setIsRunning(false);
-      setCameraReady(false);
-      setMediaPipeReady(false);
-      
-      // Show user-friendly error
-      alert(`Test failed to start: ${error.message}\n\nTry refreshing the page if the problem persists.`);
+      alert(`Test failed to start: ${error.message}`);
     }
   };
 
@@ -504,8 +400,6 @@ export default function FingerTapTest({ onBack }) {
       ...prev,
       [currentHand + 'Hand']: results
     }));
-    
-    console.log('📊 Test results:', results);
     
     if (currentHand === 'right' && !testResults.leftHand) {
       setTestPhase('switchHands');
@@ -581,8 +475,6 @@ export default function FingerTapTest({ onBack }) {
   };
 
   const resetTest = () => {
-    console.log('🔄 Resetting test...');
-    
     stopCamera();
     
     setTestPhase('setup');
@@ -621,7 +513,6 @@ export default function FingerTapTest({ onBack }) {
             </p>
           </div>
 
-          {/* Preload Status */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
             <div className={`p-4 rounded-lg border ${cameraPermissionGranted ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
               <div className="flex items-center">
@@ -644,7 +535,6 @@ export default function FingerTapTest({ onBack }) {
             </div>
           </div>
 
-          {/* Preload Log */}
           <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm max-h-48 overflow-y-auto text-left max-w-3xl mx-auto">
             <h3 className="text-white font-semibold mb-2">Loading Progress:</h3>
             {preloadLog.map((entry, index) => (
@@ -679,7 +569,6 @@ export default function FingerTapTest({ onBack }) {
     );
   }
 
-  // Show preload error screen
   if (preloadError && !isPreloading) {
     return (
       <div className="max-w-4xl mx-auto p-6">
@@ -699,42 +588,29 @@ export default function FingerTapTest({ onBack }) {
               <div className="text-sm">{preloadError}</div>
             </div>
 
-            <div className="space-y-4">
-              <button 
-                onClick={() => {
-                  setPreloadError(null);
-                  setPreloadLog([]);
-                  setIsPreloading(true);
-                  preloadEverything();
-                }}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                🔄 Try Again
-              </button>
-              
-              <div className="text-sm text-gray-600">
-                <p><strong>Common solutions:</strong></p>
-                <ul className="list-disc list-inside mt-2 space-y-1">
-                  <li>Refresh the page and allow camera permissions</li>
-                  <li>Check internet connection for MediaPipe loading</li>
-                  <li>Try a different browser (Chrome recommended)</li>
-                  <li>Ensure HTTPS connection for camera access</li>
-                </ul>
-              </div>
+            <button 
+              onClick={() => {
+                setPreloadError(null);
+                setPreloadLog([]);
+                setIsPreloading(true);
+                preloadEverything();
+              }}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              🔄 Try Again
+            </button>
 
-              {onBack && (
-                <button onClick={onBack} className="text-gray-600 hover:text-gray-800 underline">
-                  ← Back to Home
-                </button>
-              )}
-            </div>
+            {onBack && (
+              <button onClick={onBack} className="block mx-auto mt-4 text-gray-600 hover:text-gray-800 underline">
+                ← Back to Home
+              </button>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
-  // Normal test flow starts here (setup phase)
   if (testPhase === 'setup') {
     return (
       <div className="max-w-4xl mx-auto p-6">
@@ -750,7 +626,6 @@ export default function FingerTapTest({ onBack }) {
             </p>
           </div>
 
-          {/* Ready Status */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
             <div className="p-4 rounded-lg border bg-green-50 border-green-200">
               <div className="flex items-center">
@@ -791,25 +666,6 @@ export default function FingerTapTest({ onBack }) {
             </ul>
           </div>
 
-          {/* Sensitivity Settings */}
-          <div className="bg-gray-50 p-4 rounded-lg max-w-md mx-auto">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-gray-700 font-semibold">Sensitivity</span>
-              <select 
-                value={sensitivity} 
-                onChange={(e) => setSensitivity(e.target.value)}
-                className="bg-white border border-gray-300 px-3 py-1 rounded"
-              >
-                <option value="low">Low (Less sensitive)</option>
-                <option value="normal">Normal (Recommended)</option>
-                <option value="high">High (More sensitive)</option>
-              </select>
-            </div>
-            <p className="text-sm text-gray-500">
-              Adjust if taps aren't being detected properly
-            </p>
-          </div>
-
           <button
             onClick={() => setTestPhase('instructions')}
             className="px-8 py-4 text-lg font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -837,7 +693,7 @@ export default function FingerTapTest({ onBack }) {
           <p className="text-lg text-gray-600">AI will automatically detect your finger taps</p>
         </div>
 
-        {/* Video and Canvas - Now on instructions screen */}
+        {/* Video and Canvas on instructions screen */}
         <div className="relative bg-gray-900 rounded-lg overflow-hidden">
           <video
             ref={videoRef}
@@ -847,6 +703,7 @@ export default function FingerTapTest({ onBack }) {
             className="w-full h-64 object-cover"
             style={{ transform: 'scaleX(-1)' }}
           />
+          {/* MediaPipe canvas */}
           <canvas
             ref={canvasRef}
             width={640}
@@ -854,8 +711,15 @@ export default function FingerTapTest({ onBack }) {
             className="absolute top-0 left-0 w-full h-full"
             style={{ transform: 'scaleX(-1)' }}
           />
+          {/* Separate flash effect canvas */}
+          <canvas
+            ref={overlayCanvasRef}
+            width={640}
+            height={480}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+            style={{ transform: 'scaleX(-1)' }}
+          />
           
-          {/* Camera preview overlay */}
           <div className="absolute inset-0 flex items-center justify-center bg-black/70">
             <div className="text-center text-white p-6">
               <div className="text-4xl mb-4">📹</div>
@@ -884,7 +748,6 @@ export default function FingerTapTest({ onBack }) {
             <div className="space-y-3 text-sm text-gray-700">
               <p>• Tap with your index finger in a natural up-down motion</p>
               <p>• Make clear, deliberate tapping movements</p>
-              <p>• The AI will automatically count each tap</p>
               <p>• No need to click anything - just tap naturally!</p>
             </div>
           </div>
@@ -936,11 +799,20 @@ export default function FingerTapTest({ onBack }) {
             className="w-full h-96 object-cover"
             style={{ transform: 'scaleX(-1)' }}
           />
+          {/* MediaPipe canvas */}
           <canvas
             ref={canvasRef}
             width={640}
             height={480}
             className="absolute top-0 left-0 w-full h-full"
+            style={{ transform: 'scaleX(-1)' }}
+          />
+          {/* Flash effect overlay canvas */}
+          <canvas
+            ref={overlayCanvasRef}
+            width={640}
+            height={480}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
             style={{ transform: 'scaleX(-1)' }}
           />
           
@@ -969,8 +841,8 @@ export default function FingerTapTest({ onBack }) {
             )}
           </div>
           
-          {/* Debug overlay - Show real-time data */}
-          <div className="absolute top-4 left-4 bg-black/95 px-4 py-3 rounded text-white">
+          {/* Performance overlay */}
+          <div className="absolute top-4 left-4 bg-black/90 px-4 py-3 rounded text-white">
             <div className="text-3xl font-bold text-yellow-400">{tapCount}</div>
             <div className="text-sm">taps detected</div>
             <div className="text-blue-400 text-sm">
@@ -978,12 +850,6 @@ export default function FingerTapTest({ onBack }) {
             </div>
             <div className="text-xs text-gray-400 mt-1">
               Running: {isRunning ? '✅ YES' : '❌ NO'}
-            </div>
-            <div className="text-xs text-purple-400">
-              LastY: {lastFingerTipY.current ? lastFingerTipY.current.toFixed(1) : 'null'}
-            </div>
-            <div className="text-xs text-orange-400">
-              Canvas: {canvasRef.current ? `${canvasRef.current.width}x${canvasRef.current.height}` : 'null'}
             </div>
             {timeRemaining <= 3 && timeRemaining > 0 && (
               <div className="text-red-400 text-xs font-bold animate-pulse mt-1">
