@@ -15,7 +15,11 @@ export default function EyeTrackingTest() {
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext('2d');
 
-    const faceMesh = new FaceMesh();
+    const faceMesh = new FaceMesh({
+  locateFile: (file) =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
+});
+
     faceMesh.setOptions({
       selfieMode: true,
       maxNumFaces: 1,
