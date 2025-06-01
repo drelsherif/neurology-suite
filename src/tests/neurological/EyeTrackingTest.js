@@ -4,8 +4,13 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const [irisOffset, setIrisOffset] = useState({ x: 0, y: 0 });
+  const [leftIris, setLeftIris] = useState({ x: 0, y: 0 });
+  const [rightIris, setRightIris] = useState({ x: 0, y: 0 });
   const [faceDetected, setFaceDetected] = useState(false);
+  const [targetPos, setTargetPos] = useState({ x: 0.5, y: 0.5 });
+  const [trackingData, setTrackingData] = useState([]);
+  const [results, setResults] = useState(null);
+  const [testRunning, setTestRunning] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -36,24 +41,51 @@ export default function EyeTrackingTest() {
       setFaceDetected(true);
       const lm = results.multiFaceLandmarks[0];
 
-      const iris = lm[468];
-      const inner = lm[133];
-      const outer = lm[33];
-      const top = lm[159];
-      const bottom = lm[145];
+      const getIrisOffset = (irisIndex, innerIndex, outerIndex, topIndex, bottomIndex) => {
+        const iris = lm[irisIndex];
+        const inner = lm[innerIndex];
+        const outer = lm[outerIndex];
+        const top = lm[topIndex];
+        const bottom = lm[bottomIndex];
+        const width = Math.abs(outer.x - inner.x);
+        const height = Math.abs(top.y - bottom.y);
+        return {
+          x: (iris.x - inner.x) / width - 0.5,
+          y: (iris.y - top.y) / height - 0.5,
+        };
+      };
 
-      const width = Math.abs(outer.x - inner.x);
-      const height = Math.abs(top.y - bottom.y);
-
-      const offsetX = (iris.x - inner.x) / width - 0.5;
-      const offsetY = (iris.y - top.y) / height - 0.5;
-
-      setIrisOffset({ x: offsetX, y: offsetY });
+      const leftOffset = getIrisOffset(468, 133, 33, 159, 145);
+      const rightOffset = getIrisOffset(473, 362, 263, 386, 374);
+      setLeftIris(leftOffset);
+      setRightIris(rightOffset);
 
       ctx.beginPath();
-      ctx.arc(iris.x * canvas.width, iris.y * canvas.height, 4, 0, 2 * Math.PI);
+      ctx.arc(lm[468].x * canvas.width, lm[468].y * canvas.height, 4, 0, 2 * Math.PI);
       ctx.strokeStyle = 'red';
       ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(lm[473].x * canvas.width, lm[473].y * canvas.height, 4, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'blue';
+      ctx.stroke();
+
+      // Draw moving target
+      if (testRunning) {
+        const dotX = targetPos.x * canvas.width;
+        const dotY = targetPos.y * canvas.height;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = 'yellow';
+        ctx.fill();
+
+        // Record tracking data
+        setTrackingData(prev => [...prev, {
+          left: leftOffset,
+          right: rightOffset,
+          target: { ...targetPos },
+          timestamp: Date.now()
+        }]);
+      }
     });
 
     const startCamera = async () => {
@@ -74,7 +106,46 @@ export default function EyeTrackingTest() {
     };
 
     startCamera();
-  }, []);
+  }, [targetPos, testRunning]);
+
+  const runTest = () => {
+    setTrackingData([]);
+    setResults(null);
+    setTestRunning(true);
+
+    let angle = 0;
+    const start = Date.now();
+    const duration = 10000;
+
+    const move = () => {
+      const now = Date.now();
+      if (now - start > duration) {
+        setTestRunning(false);
+        analyzeResults();
+        return;
+      }
+      angle += 0.05;
+      setTargetPos({
+        x: 0.5 + 0.3 * Math.cos(angle),
+        y: 0.5 + 0.2 * Math.sin(angle),
+      });
+      requestAnimationFrame(move);
+    };
+    move();
+  };
+
+  const analyzeResults = () => {
+    const errors = trackingData.map(d => {
+      const dx = (d.left.x + d.right.x) / 2 - (d.target.x - 0.5);
+      const dy = (d.left.y + d.right.y) / 2 - (d.target.y - 0.5);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      return dist;
+    });
+    const avgError = (errors.reduce((a, b) => a + b, 0) / errors.length).toFixed(3);
+    const maxError = Math.max(...errors).toFixed(3);
+    const minError = Math.min(...errors).toFixed(3);
+    setResults({ avgError, minError, maxError });
+  };
 
   return (
     <div className="fixed inset-0 bg-black z-0">
@@ -93,10 +164,26 @@ export default function EyeTrackingTest() {
         height={480}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none"
       />
-      <div className="absolute top-2 left-2 z-20 text-sm text-white bg-black/70 p-2 rounded">
+      <div className="absolute top-4 left-4 z-20 bg-white/90 text-black text-sm p-2 rounded">
         Face: {faceDetected ? '✓' : '✗'}<br />
-        x: {irisOffset.x.toFixed(2)}, y: {irisOffset.y.toFixed(2)}
+        L x: {leftIris.x.toFixed(2)}, y: {leftIris.y.toFixed(2)}<br />
+        R x: {rightIris.x.toFixed(2)}, y: {rightIris.y.toFixed(2)}
       </div>
+      {!testRunning && (
+        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-30">
+          <button onClick={runTest} className="bg-blue-600 text-white px-6 py-2 rounded shadow">
+            Start Test
+          </button>
+        </div>
+      )}
+      {results && (
+        <div className="absolute bottom-6 right-4 z-30 bg-white text-black p-3 rounded shadow text-sm">
+          <strong>Tracking Results</strong><br />
+          Avg error: {results.avgError}<br />
+          Min error: {results.minError}<br />
+          Max error: {results.maxError}
+        </div>
+      )}
     </div>
   );
 }
