@@ -1,5 +1,8 @@
 // src/tests/neurological/EyeTrackingTest.js
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { getOrCreateCamera, stopCamera } from '../../services/mediapipe/MediaPipeService';
+import { getFaceMesh } from '../../services/mediapipe/FaceMeshService';
+
 
 export default function EyeMovementTest({ onBack }) {
   const videoRef = useRef(null);
@@ -182,21 +185,11 @@ export default function EyeMovementTest({ onBack }) {
         throw new Error('FaceMesh not available on window object');
       }
       
-      faceMeshRef.current = new window.FaceMesh({
-        locateFile: (file) => {
-          console.log('MediaPipe loading file:', file);
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-        },
-      });
+      const faceMesh = getFaceMesh();
+    faceMeshRef.current = faceMesh;
+    
 
-      faceMeshRef.current.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.3,
-        minTrackingConfidence: 0.3,
-        selfieMode: true
-      });
-
+    
       faceMeshRef.current.onResults(onResults);
       addPreloadLog('✅ Face Mesh configured with low thresholds');
       console.log('MediaPipe Face Mesh initialized successfully');
@@ -502,7 +495,7 @@ export default function EyeMovementTest({ onBack }) {
         addPreloadLog('✅ Video stream connected');
       }
 
-      cameraRef.current = new window.Camera(videoRef.current, {
+      cameraRef.current = getOrCreateCamera(videoRef.current, {
         onFrame: async () => {
           if (videoRef.current && faceMeshRef.current) {
             try {
