@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 
-export default function EyeTrackingTest({ onBack }) {
+export default function EyeMovementTest({ onBack }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayCanvasRef = useRef(null);
@@ -436,6 +436,7 @@ export default function EyeTrackingTest({ onBack }) {
 
   const startEyeTest = async () => {
     try {
+      // Start camera first, then go to instructions
       await startCamera();
       setTestPhase('instructions');
     } catch (error) {
@@ -679,6 +680,29 @@ export default function EyeTrackingTest({ onBack }) {
             <p className="text-lg text-gray-600">
               Advanced neurological eye tracking with MediaPipe Face Mesh
             </p>
+          </div>
+
+          {/* Add video elements here for camera preview */}
+          <div className="hidden">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{ transform: 'scaleX(-1)' }}
+            />
+            <canvas
+              ref={canvasRef}
+              width={640}
+              height={480}
+              style={{ transform: 'scaleX(-1)' }}
+            />
+            <canvas
+              ref={overlayCanvasRef}
+              width={640}
+              height={480}
+              style={{ transform: 'scaleX(-1)' }}
+            />
           </div>
 
           <div className="bg-purple-50 border border-purple-200 p-6 rounded-lg text-left space-y-4 max-w-2xl mx-auto">
