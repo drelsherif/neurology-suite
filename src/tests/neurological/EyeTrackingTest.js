@@ -4,6 +4,7 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const zoomCanvasRef = useRef(null);
   const targetPosRef = useRef({ x: 0.5, y: 0.5 });
   const [leftIris, setLeftIris] = useState({ x: 0, y: 0 });
   const [rightIris, setRightIris] = useState({ x: 0, y: 0 });
@@ -15,7 +16,9 @@ export default function EyeTrackingTest() {
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    const zoomCanvas = zoomCanvasRef.current;
     const ctx = canvas.getContext('2d');
+    const zoomCtx = zoomCanvas.getContext('2d');
 
     const faceMesh = new FaceMesh({
       locateFile: (file) =>
@@ -32,6 +35,7 @@ export default function EyeTrackingTest() {
 
     faceMesh.onResults((results) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      zoomCtx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
 
       if (!results.multiFaceLandmarks?.length) {
         setFaceDetected(false);
@@ -40,6 +44,16 @@ export default function EyeTrackingTest() {
 
       setFaceDetected(true);
       const lm = results.multiFaceLandmarks[0];
+
+      const anchor = lm[1]; // Nose tip
+      const anchorX = anchor.x * canvas.width;
+      const anchorY = anchor.y * canvas.height;
+
+      // Draw nose anchor lock
+      ctx.beginPath();
+      ctx.arc(anchorX, anchorY, 5, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'blue';
+      ctx.stroke();
 
       const getIrisOffset = (irisIndex, innerIndex, outerIndex, topIndex, bottomIndex) => {
         const iris = lm[irisIndex];
@@ -52,22 +66,22 @@ export default function EyeTrackingTest() {
         return {
           x: (iris.x - inner.x) / width - 0.5,
           y: (iris.y - top.y) / height - 0.5,
+          raw: iris
         };
       };
 
-      const leftOffset = getIrisOffset(468, 133, 33, 159, 145);
-      const rightOffset = getIrisOffset(473, 362, 263, 386, 374);
-      setLeftIris(leftOffset);
-      setRightIris(rightOffset);
+      const left = getIrisOffset(468, 133, 33, 159, 145);
+      const right = getIrisOffset(473, 362, 263, 386, 374);
+      setLeftIris(left);
+      setRightIris(right);
 
-      ctx.beginPath();
-      ctx.arc(lm[468].x * canvas.width, lm[468].y * canvas.height, 4, 0, 2 * Math.PI);
-      ctx.strokeStyle = 'red';
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(lm[473].x * canvas.width, lm[473].y * canvas.height, 4, 0, 2 * Math.PI);
-      ctx.strokeStyle = 'blue';
-      ctx.stroke();
+      // Draw irises
+      [left.raw, right.raw].forEach((pt, idx) => {
+        ctx.beginPath();
+        ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 4, 0, 2 * Math.PI);
+        ctx.strokeStyle = idx === 0 ? 'red' : 'green';
+        ctx.stroke();
+      });
 
       // Draw moving target
       if (testRunning) {
@@ -78,13 +92,33 @@ export default function EyeTrackingTest() {
         ctx.fillStyle = 'yellow';
         ctx.fill();
 
-        // Record tracking data
+        // Track
         setTrackingData(prev => [...prev, {
-          left: leftOffset,
-          right: rightOffset,
+          left: left,
+          right: right,
           target: { ...targetPosRef.current },
           timestamp: Date.now()
         }]);
+
+        // Zoom box: bounding both eyes
+        const lx = left.raw.x * canvas.width;
+        const ly = left.raw.y * canvas.height;
+        const rx = right.raw.x * canvas.width;
+        const ry = right.raw.y * canvas.height;
+
+        const boxX = Math.min(lx, rx) - 40;
+        const boxY = Math.min(ly, ry) - 40;
+        const boxW = Math.abs(rx - lx) + 80;
+        const boxH = Math.abs(ry - ly) + 80;
+
+        zoomCtx.drawImage(
+          video,
+          boxX, boxY, boxW, boxH,
+          0, 0, zoomCanvas.width, zoomCanvas.height
+        );
+
+        ctx.strokeStyle = 'white';
+        ctx.strokeRect(boxX, boxY, boxW, boxH);
       }
     });
 
@@ -124,10 +158,10 @@ export default function EyeTrackingTest() {
         analyzeResults();
         return;
       }
-      angle += 0.05;
+      angle += 0.04;
       targetPosRef.current = {
-        x: 0.5 + 0.3 * Math.cos(angle),
-        y: 0.5 + 0.2 * Math.sin(angle),
+        x: 0.5 + 0.25 * Math.cos(angle),
+        y: 0.5 + 0.18 * Math.sin(angle),
       };
       requestAnimationFrame(move);
     };
@@ -138,8 +172,7 @@ export default function EyeTrackingTest() {
     const errors = trackingData.map(d => {
       const dx = (d.left.x + d.right.x) / 2 - (d.target.x - 0.5);
       const dy = (d.left.y + d.right.y) / 2 - (d.target.y - 0.5);
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      return dist;
+      return Math.sqrt(dx * dx + dy * dy);
     });
     const avgError = (errors.reduce((a, b) => a + b, 0) / errors.length).toFixed(3);
     const maxError = Math.max(...errors).toFixed(3);
@@ -164,7 +197,13 @@ export default function EyeTrackingTest() {
         height={480}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none"
       />
-      <div className="absolute top-4 left-4 z-20 bg-white/90 text-black text-sm p-2 rounded">
+      <canvas
+        ref={zoomCanvasRef}
+        width={200}
+        height={120}
+        className="absolute bottom-4 left-4 z-20 border-2 border-white bg-black"
+      />
+      <div className="absolute top-4 left-4 z-30 bg-white/90 text-black text-sm p-2 rounded">
         Face: {faceDetected ? '✓' : '✗'}<br />
         L x: {leftIris.x.toFixed(2)}, y: {leftIris.y.toFixed(2)}<br />
         R x: {rightIris.x.toFixed(2)}, y: {rightIris.y.toFixed(2)}
