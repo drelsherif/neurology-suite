@@ -6,12 +6,14 @@ export default function EyeTrackingTest() {
   const canvasRef = useRef(null);
   const zoomCanvasRef = useRef(null);
   const targetPosRef = useRef({ x: 0.5, y: 0.5 });
-  const [leftIris, setLeftIris] = useState({ x: 0, y: 0 });
-  const [rightIris, setRightIris] = useState({ x: 0, y: 0 });
+
   const [faceDetected, setFaceDetected] = useState(false);
   const [trackingData, setTrackingData] = useState([]);
   const [results, setResults] = useState(null);
   const [testRunning, setTestRunning] = useState(false);
+
+  const prevLeft = useRef({ x: 0, y: 0 });
+  const prevRight = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     const video = videoRef.current;
@@ -29,8 +31,8 @@ export default function EyeTrackingTest() {
       selfieMode: true,
       maxNumFaces: 1,
       refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.8,
     });
 
     faceMesh.onResults((results) => {
@@ -45,67 +47,77 @@ export default function EyeTrackingTest() {
       setFaceDetected(true);
       const lm = results.multiFaceLandmarks[0];
 
-      const getIrisOffset = (irisIndex, innerIndex, outerIndex, topIndex, bottomIndex) => {
-        const iris = lm[irisIndex];
-        const inner = lm[innerIndex];
-        const outer = lm[outerIndex];
-        const top = lm[topIndex];
-        const bottom = lm[bottomIndex];
+      const smoothIris = (current, prev) => {
+        const smooth = {
+          x: 0.8 * prev.x + 0.2 * current.x,
+          y: 0.8 * prev.y + 0.2 * current.y,
+        };
+        return smooth;
+      };
+
+      const getIris = (irisIdx, innerIdx, outerIdx, topIdx, bottomIdx, prev) => {
+        const iris = lm[irisIdx];
+        const inner = lm[innerIdx];
+        const outer = lm[outerIdx];
+        const top = lm[topIdx];
+        const bottom = lm[bottomIdx];
+
         const width = Math.abs(outer.x - inner.x);
         const height = Math.abs(top.y - bottom.y);
-        return {
-          x: width > 0.01 ? (iris.x - inner.x) / width - 0.5 : 0,
-          y: height > 0.01 ? (iris.y - top.y) / height - 0.5 : 0,
-          raw: iris,
+
+        if (width < 0.01 || height < 0.01) return prev;
+
+        const offset = {
+          x: (iris.x - inner.x) / width - 0.5,
+          y: (iris.y - top.y) / height - 0.5,
         };
+
+        const smoothed = smoothIris(offset, prev);
+        return smoothed;
       };
 
-      const left = getIrisOffset(468, 133, 33, 159, 145);
-      const right = getIrisOffset(473, 362, 263, 386, 374);
-      setLeftIris(left);
-      setRightIris(right);
+      const left = getIris(468, 133, 33, 159, 145, prevLeft.current);
+      const right = getIris(473, 362, 263, 386, 374, prevRight.current);
 
-      // Midpoint of irises for zoom + blue anchor
-      const anchor = {
-        x: (left.raw.x + right.raw.x) / 2,
-        y: (left.raw.y + right.raw.y) / 2,
-      };
-      const anchorX = anchor.x * canvas.width;
-      const anchorY = anchor.y * canvas.height;
+      prevLeft.current = left;
+      prevRight.current = right;
+
+      // Midpoint
+      const midX = (lm[468].x + lm[473].x) / 2;
+      const midY = (lm[468].y + lm[473].y) / 2;
+      const anchorX = midX * canvas.width;
+      const anchorY = midY * canvas.height;
 
       ctx.beginPath();
       ctx.arc(anchorX, anchorY, 5, 0, 2 * Math.PI);
       ctx.strokeStyle = 'blue';
       ctx.stroke();
 
-      // Draw irises
-      [left.raw, right.raw].forEach((pt, idx) => {
-        ctx.beginPath();
-        ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 4, 0, 2 * Math.PI);
-        ctx.strokeStyle = idx === 0 ? 'red' : 'green';
-        ctx.stroke();
-      });
-
       if (testRunning) {
         const dotX = targetPosRef.current.x * canvas.width;
         const dotY = targetPosRef.current.y * canvas.height;
+
         ctx.beginPath();
         ctx.arc(dotX, dotY, 6, 0, 2 * Math.PI);
         ctx.fillStyle = 'yellow';
         ctx.fill();
 
-        setTrackingData(prev => [...prev, {
-          left: left,
-          right: right,
-          target: { ...targetPosRef.current },
-          timestamp: Date.now(),
-        }]);
+        setTrackingData(prev => [
+          ...prev,
+          {
+            left,
+            right,
+            target: { ...targetPosRef.current },
+            timestamp: Date.now(),
+          },
+        ]);
 
-        // Zoom box between eyes
-        const lx = left.raw.x * canvas.width;
-        const ly = left.raw.y * canvas.height;
-        const rx = right.raw.x * canvas.width;
-        const ry = right.raw.y * canvas.height;
+        // Zoom box
+        const lx = lm[468].x * canvas.width;
+        const ly = lm[468].y * canvas.height;
+        const rx = lm[473].x * canvas.width;
+        const ry = lm[473].y * canvas.height;
+
         const centerX = (lx + rx) / 2;
         const centerY = (ly + ry) / 2;
         const boxW = Math.abs(rx - lx) + 80;
@@ -201,9 +213,7 @@ export default function EyeTrackingTest() {
         className="absolute bottom-4 left-4 z-20 border-2 border-white bg-black"
       />
       <div className="absolute top-4 left-4 z-30 bg-white/90 text-black text-sm p-2 rounded">
-        Face: {faceDetected ? '✓' : '✗'}<br />
-        L x: {leftIris.x.toFixed(2)}, y: {leftIris.y.toFixed(2)}<br />
-        R x: {rightIris.x.toFixed(2)}, y: {rightIris.y.toFixed(2)}
+        Face: {faceDetected ? '✓' : '✗'}
       </div>
       {!testRunning && (
         <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-30">
