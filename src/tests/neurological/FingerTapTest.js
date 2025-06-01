@@ -36,11 +36,12 @@ export default function FingerTapTest({ onBack }) {
   // Settings
   const [sensitivity, setSensitivity] = useState('normal');
   
-  // Tap detection
+  // Tap detection refs
   const lastFingerTipY = useRef(null);
   const lastTapTime = useRef(0);
   const tapThreshold = useRef(25);
   const minTapInterval = useRef(150);
+  const tapCountRef = useRef(0); // Add tap count ref to avoid state issues
 
   const addPreloadLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -201,9 +202,9 @@ export default function FingerTapTest({ onBack }) {
     console.log(`🎯 Mobile sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
   }, []);
 
-  // Ultra-simple tap detection - catch 150px movements
+  // Fixed tap detection - prevent callback recreation issues
   const detectTap = useCallback((landmarks) => {
-    console.log('🔍 detectTap called, isRunning:', isRunning);
+    console.log('🔍 detectTap called at', new Date().toLocaleTimeString());
     
     if (!canvasRef.current) {
       console.log('❌ No canvas');
@@ -224,31 +225,41 @@ export default function FingerTapTest({ onBack }) {
       console.log(`📏 Movement: ${movement.toFixed(1)}px`);
       
       // If you're seeing 150px changes, let's catch them!
-      if (movement > 50) { // Much lower than 150
+      if (movement > 50) {
         const currentTime = Date.now();
+        const timeSinceLastTap = currentTime - lastTapTime.current;
         
-        // Ignore timing for now - just detect any big movement
-        if (currentTime - lastTapTime.current > 100) {
+        console.log(`⏰ Time since last tap: ${timeSinceLastTap}ms`);
+        
+        // Very short interval to allow multiple detections
+        if (timeSinceLastTap > 50) { // Very short interval
           lastTapTime.current = currentTime;
           
           console.log('🎉🎉🎉 BIG MOVEMENT DETECTED!', movement.toFixed(1), 'px');
           
+          // Use a ref to avoid state update issues
+          tapCountRef.current = (tapCountRef.current || 0) + 1;
+          
           // Force state update
-          setTapCount(prevCount => {
-            const newCount = prevCount + 1;
-            console.log('🔥 FORCE UPDATE TAP COUNT TO:', newCount);
-            alert(`TAP ${newCount} DETECTED! Movement: ${movement.toFixed(1)}px`); // Alert for iPhone
-            return newCount;
-          });
+          setTapCount(tapCountRef.current);
+          
+          console.log('🔥 TAP COUNT UPDATED TO:', tapCountRef.current);
+          alert(`TAP ${tapCountRef.current} DETECTED! Movement: ${movement.toFixed(1)}px`);
           
           // Flash
           flashFingerTip(indexTip);
+        } else {
+          console.log('⏳ Too soon since last tap');
         }
+      } else {
+        console.log('📏 Movement too small:', movement.toFixed(1));
       }
+    } else {
+      console.log('📍 First position recorded');
     }
     
     lastFingerTipY.current = tipY;
-  }, [isRunning]);
+  }, []); // NO DEPENDENCIES to prevent recreation
 
   const flashFingerTip = (indexTip) => {
     console.log('💥💥💥 FLASH EFFECT STARTING!');
@@ -452,9 +463,10 @@ export default function FingerTapTest({ onBack }) {
       console.log('📷 Starting camera with existing elements...');
       await startCamera();
       
-      // Reset tracking values
+      // Reset ALL tracking values
       lastFingerTipY.current = null;
       lastTapTime.current = 0;
+      tapCountRef.current = 0; // Reset ref counter
       
       // Then switch to testing phase and start the test
       setTapCount(0);
