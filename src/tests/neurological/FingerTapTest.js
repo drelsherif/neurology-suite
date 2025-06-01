@@ -1,336 +1,13 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 
-// Enhanced HandTracker class
-class HandTracker {
-  constructor() {
-    this.hands = null;
-    this.camera = null;
-    this.isInitialized = false;
-    this.onResultsCallback = null;
-    this.lastFingerTipY = null;
-    this.tapThreshold = 25;
-    this.lastTapTime = 0;
-    this.minTapInterval = 150;
-    this.onTapDetected = null;
-    this.isTracking = false;
-    this.videoElement = null;
-    this.canvasElement = null;
-  }
-
-  async requestCameraPermission() {
-    console.log('📷 Requesting camera permission...');
-    
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera API not supported in this browser');
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          width: 640, 
-          height: 480,
-          facingMode: 'user'
-        } 
-      });
-      
-      console.log('✅ Camera permission granted');
-      stream.getTracks().forEach(track => track.stop());
-      return true;
-    } catch (error) {
-      console.error('❌ Camera permission failed:', error);
-      
-      let errorMessage = 'Camera access failed: ';
-      if (error.name === 'NotAllowedError') {
-        errorMessage += 'Permission denied. Please allow camera access and try again.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage += 'No camera found. Please ensure you have a camera connected.';
-      } else {
-        errorMessage += error.message;
-      }
-      
-      throw new Error(errorMessage);
-    }
-  }
-
-  async loadMediaPipeScripts() {
-    console.log('📦 Loading MediaPipe scripts...');
-    
-    const scripts = [
-      'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js',
-      'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js',
-      'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js'
-    ];
-
-    for (const src of scripts) {
-      if (!document.querySelector(`script[src="${src}"]`)) {
-        await this.loadScript(src);
-        console.log(`✅ Loaded: ${src.split('/').pop()}`);
-      }
-    }
-    
-    let attempts = 0;
-    while (typeof window.Hands === 'undefined' && attempts < 50) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      attempts++;
-    }
-    
-    if (typeof window.Hands === 'undefined') {
-      throw new Error('MediaPipe failed to load after timeout');
-    }
-    
-    console.log('✅ All MediaPipe scripts loaded successfully');
-  }
-
-  loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = resolve;
-      script.onerror = () => reject(new Error(`Failed to load ${src}`));
-      document.head.appendChild(script);
-    });
-  }
-
-  async initialize(videoElement, canvasElement, onResults) {
-    try {
-      console.log('🔄 Initializing Hand Tracker...');
-      
-      this.videoElement = videoElement;
-      this.canvasElement = canvasElement;
-      this.onResultsCallback = onResults;
-
-      // Step 1: Request camera permission
-      await this.requestCameraPermission();
-
-      // Step 2: Load MediaPipe scripts
-      if (typeof window.Hands === 'undefined') {
-        await this.loadMediaPipeScripts();
-      }
-
-      // Step 3: Initialize MediaPipe Hands
-      console.log('🤖 Initializing MediaPipe Hands...');
-      
-      this.hands = new window.Hands({
-        locateFile: (file) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-        }
-      });
-
-      this.hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.5
-      });
-
-      this.hands.onResults((results) => this.onResults(results));
-
-      // Step 4: Initialize camera
-      console.log('📷 Starting camera...');
-      this.camera = new window.Camera(videoElement, {
-        onFrame: async () => {
-          if (this.hands && this.isTracking) {
-            try {
-              await this.hands.send({ image: videoElement });
-            } catch (error) {
-              console.warn('Frame processing error:', error);
-            }
-          }
-        },
-        width: 640,
-        height: 480
-      });
-
-      this.isInitialized = true;
-      console.log('✅ Hand Tracker fully initialized');
-      return true;
-
-    } catch (error) {
-      console.error('❌ Hand Tracker initialization failed:', error);
-      throw error;
-    }
-  }
-
-  async start() {
-    if (!this.isInitialized) {
-      throw new Error('HandTracker not initialized');
-    }
-    
-    try {
-      console.log('▶️ Starting hand tracking...');
-      this.isTracking = true;
-      await this.camera.start();
-      console.log('✅ Hand tracking started');
-    } catch (error) {
-      console.error('❌ Failed to start camera:', error);
-      throw new Error(`Failed to start camera: ${error.message}`);
-    }
-  }
-
-  stop() {
-    console.log('⏹️ Stopping hand tracking...');
-    this.isTracking = false;
-    
-    if (this.camera) {
-      this.camera.stop();
-    }
-    
-    if (this.canvasElement) {
-      const ctx = this.canvasElement.getContext('2d');
-      ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
-    }
-    
-    console.log('✅ Hand tracking stopped');
-  }
-
-  onResults(results) {
-    if (!this.canvasElement) return;
-    
-    const ctx = this.canvasElement.getContext('2d');
-    
-    ctx.save();
-    ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
-    
-    this.canvasElement.width = 640;
-    this.canvasElement.height = 480;
-    
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-      const landmarks = results.multiHandLandmarks[0];
-      
-      // Draw hand skeleton
-      if (window.drawConnectors && window.HAND_CONNECTIONS) {
-        window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, {
-          color: '#00FF00',
-          lineWidth: 2
-        });
-      }
-      
-      if (window.drawLandmarks) {
-        window.drawLandmarks(ctx, landmarks, {
-          color: '#FF0000',
-          lineWidth: 1,
-          radius: 3
-        });
-      }
-
-      // Highlight index finger tip
-      const indexTip = landmarks[8];
-      if (indexTip) {
-        const x = indexTip.x * this.canvasElement.width;
-        const y = indexTip.y * this.canvasElement.height;
-        
-        ctx.beginPath();
-        ctx.arc(x, y, 12, 0, 2 * Math.PI);
-        ctx.fillStyle = '#00FFFF';
-        ctx.fill();
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 12px Arial';
-        ctx.fillText('TAP HERE', x - 30, y - 20);
-      }
-
-      this.detectTap(landmarks);
-      
-    } else {
-      ctx.fillStyle = '#FFFF00';
-      ctx.font = 'bold 16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Show your hand in the camera', this.canvasElement.width / 2, this.canvasElement.height / 2);
-      ctx.textAlign = 'left';
-    }
-    
-    ctx.restore();
-
-    if (this.onResultsCallback) {
-      this.onResultsCallback(results);
-    }
-  }
-
-  detectTap(landmarks) {
-    const indexTip = landmarks[8];
-    const indexDip = landmarks[7];
-    const indexPip = landmarks[6];
-    
-    if (!indexTip || !indexDip || !indexPip) return;
-
-    const tipY = indexTip.y * this.canvasElement.height;
-    const dipY = indexDip.y * this.canvasElement.height;
-    const pipY = indexPip.y * this.canvasElement.height;
-    
-    const fingerCurvature = (dipY + pipY) / 2 - tipY;
-    
-    if (this.lastFingerTipY !== null) {
-      const movement = tipY - this.lastFingerTipY;
-      const currentTime = Date.now();
-      
-      if (movement > this.tapThreshold && 
-          fingerCurvature < 40 && 
-          currentTime - this.lastTapTime > this.minTapInterval) {
-        
-        this.lastTapTime = currentTime;
-        
-        if (this.onTapDetected) {
-          this.onTapDetected({
-            position: { x: indexTip.x, y: indexTip.y },
-            timestamp: currentTime,
-            force: Math.min(movement / this.tapThreshold, 3),
-            fingerCurvature: fingerCurvature
-          });
-        }
-        
-        this.flashFingerTip(indexTip);
-      }
-    }
-    
-    this.lastFingerTipY = tipY;
-  }
-
-  flashFingerTip(indexTip) {
-    if (!this.canvasElement) return;
-    
-    const ctx = this.canvasElement.getContext('2d');
-    const x = indexTip.x * this.canvasElement.width;
-    const y = indexTip.y * this.canvasElement.height;
-    
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, 20, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(255, 255, 0, 0.6)';
-    ctx.fill();
-    ctx.restore();
-  }
-
-  setTapCallback(callback) {
-    this.onTapDetected = callback;
-  }
-
-  adjustSensitivity(sensitivity) {
-    switch (sensitivity) {
-      case 'low':
-        this.tapThreshold = 35;
-        this.minTapInterval = 200;
-        break;
-      case 'high':
-        this.tapThreshold = 15;
-        this.minTapInterval = 100;
-        break;
-      default:
-        this.tapThreshold = 25;
-        this.minTapInterval = 150;
-    }
-  }
-}
-
 export default function FingerTapTest({ onBack }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const handTrackerRef = useRef(null);
+  const handsRef = useRef(null);
+  const cameraRef = useRef(null);
   
   // Test states
-  const [testPhase, setTestPhase] = useState('setup'); // setup, instructions, testing, results
+  const [testPhase, setTestPhase] = useState('setup');
   const [currentHand, setCurrentHand] = useState('right');
   const [isRunning, setIsRunning] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(10);
@@ -354,12 +31,235 @@ export default function FingerTapTest({ onBack }) {
   // Settings
   const [sensitivity, setSensitivity] = useState('normal');
   
-  // Real-time metrics
-  const [realTimeMetrics, setRealTimeMetrics] = useState({
-    currentSpeed: 0,
-    lastTapTime: 0,
-    handStability: 'Unknown'
-  });
+  // Tap detection
+  const lastFingerTipY = useRef(null);
+  const lastTapTime = useRef(0);
+  const tapThreshold = useRef(25);
+  const minTapInterval = useRef(150);
+
+  // Adjust sensitivity
+  const adjustSensitivity = useCallback((sens) => {
+    switch (sens) {
+      case 'low':
+        tapThreshold.current = 35;
+        minTapInterval.current = 200;
+        break;
+      case 'high':
+        tapThreshold.current = 15;
+        minTapInterval.current = 100;
+        break;
+      default:
+        tapThreshold.current = 25;
+        minTapInterval.current = 150;
+    }
+  }, []);
+
+  // Tap detection logic
+  const detectTap = useCallback((landmarks) => {
+    if (!isRunning) return;
+    
+    const indexTip = landmarks[8];
+    const indexDip = landmarks[7];
+    const indexPip = landmarks[6];
+    
+    if (!indexTip || !indexDip || !indexPip) return;
+
+    const tipY = indexTip.y * canvasRef.current.height;
+    const dipY = indexDip.y * canvasRef.current.height;
+    const pipY = indexPip.y * canvasRef.current.height;
+    
+    const fingerCurvature = (dipY + pipY) / 2 - tipY;
+    
+    if (lastFingerTipY.current !== null) {
+      const movement = tipY - lastFingerTipY.current;
+      const currentTime = Date.now();
+      
+      if (movement > tapThreshold.current && 
+          fingerCurvature < 40 && 
+          currentTime - lastTapTime.current > minTapInterval.current) {
+        
+        lastTapTime.current = currentTime;
+        
+        console.log('👆 Tap detected!');
+        setTapCount(prev => prev + 1);
+        setTapTimes(prev => [...prev, currentTime]);
+        
+        // Visual feedback
+        flashFingerTip(indexTip);
+      }
+    }
+    
+    lastFingerTipY.current = tipY;
+  }, [isRunning]);
+
+  const flashFingerTip = (indexTip) => {
+    if (!canvasRef.current) return;
+    
+    const ctx = canvasRef.current.getContext('2d');
+    const x = indexTip.x * canvasRef.current.width;
+    const y = indexTip.y * canvasRef.current.height;
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, 25, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+    ctx.fill();
+    ctx.restore();
+  };
+
+  // MediaPipe results handler
+  const onResults = useCallback((results) => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = 640;
+    canvas.height = 480;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks = results.multiHandLandmarks[0];
+      
+      setHandDetected(true);
+      const handedness = results.multiHandedness?.[0]?.label || 'Unknown';
+      setCurrentHandedness(handedness);
+
+      // Draw hand skeleton
+      if (window.drawConnectors && window.HAND_CONNECTIONS) {
+        window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, {
+          color: '#00FF00',
+          lineWidth: 2
+        });
+      }
+      
+      if (window.drawLandmarks) {
+        window.drawLandmarks(ctx, landmarks, {
+          color: '#FF0000',
+          lineWidth: 1,
+          radius: 3
+        });
+      }
+
+      // Highlight index finger tip
+      const indexTip = landmarks[8];
+      if (indexTip) {
+        const x = indexTip.x * canvas.width;
+        const y = indexTip.y * canvas.height;
+        
+        ctx.beginPath();
+        ctx.arc(x, y, 15, 0, 2 * Math.PI);
+        ctx.fillStyle = '#00FFFF';
+        ctx.fill();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 14px Arial';
+        ctx.fillText('TAP HERE', x - 35, y - 25);
+      }
+
+      // Detect taps
+      detectTap(landmarks);
+      
+    } else {
+      setHandDetected(false);
+      setCurrentHandedness('Unknown');
+      
+      ctx.fillStyle = '#FFFF00';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Show your hand in the camera', canvas.width / 2, canvas.height / 2);
+      ctx.textAlign = 'left';
+    }
+  }, [detectTap]);
+
+  // Simple camera setup - use existing MediaPipe
+  const setupCamera = async () => {
+    try {
+      setIsInitializing(true);
+      setInitializationError(null);
+      
+      console.log('🚀 Setting up camera with existing MediaPipe...');
+
+      // Check if MediaPipe is already loaded
+      if (typeof window.Hands === 'undefined' || typeof window.Camera === 'undefined') {
+        throw new Error('MediaPipe not loaded. Please refresh the page.');
+      }
+
+      console.log('✅ MediaPipe found');
+
+      // Request camera permission
+      await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 640, height: 480, facingMode: 'user' } 
+      }).then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+        console.log('✅ Camera permission granted');
+      });
+
+      // Initialize MediaPipe Hands
+      handsRef.current = new window.Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      });
+
+      handsRef.current.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5,
+      });
+
+      handsRef.current.onResults(onResults);
+
+      // Initialize camera
+      cameraRef.current = new window.Camera(videoRef.current, {
+        onFrame: async () => {
+          if (videoRef.current && handsRef.current) {
+            await handsRef.current.send({ image: videoRef.current });
+          }
+        },
+        width: 640,
+        height: 480,
+      });
+
+      console.log('✅ Camera initialized');
+      setIsInitializing(false);
+      return true;
+
+    } catch (error) {
+      console.error('❌ Setup failed:', error);
+      setInitializationError(error.message);
+      setIsInitializing(false);
+      return false;
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      if (!cameraRef.current) {
+        const success = await setupCamera();
+        if (!success) return false;
+      }
+      
+      await cameraRef.current.start();
+      setCameraReady(true);
+      setMediaPipeReady(true);
+      console.log('✅ Camera started');
+      return true;
+    } catch (error) {
+      console.error('❌ Camera start failed:', error);
+      setInitializationError(error.message);
+      return false;
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraRef.current) {
+      cameraRef.current.stop();
+      setCameraReady(false);
+    }
+  };
 
   // Timer effect
   useEffect(() => {
@@ -378,101 +278,27 @@ export default function FingerTapTest({ onBack }) {
     return () => clearInterval(interval);
   }, [isRunning, timeRemaining]);
 
-  // MediaPipe results handler
-  const onResults = useCallback((results) => {
-    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-      setHandDetected(false);
-      setCurrentHandedness('Unknown');
-      return;
-    }
-    
-    setHandDetected(true);
-    const handedness = results.multiHandedness?.[0]?.label || 'Unknown';
-    setCurrentHandedness(handedness);
-    setRealTimeMetrics(prev => ({
-      ...prev,
-      handStability: 'Good'
-    }));
-  }, []);
-
-  // Initialize MediaPipe
-  const setupCamera = async () => {
-    try {
-      console.log('🚀 Starting camera setup...');
-      setIsInitializing(true);
-      setInitializationError(null);
-      
-      if (!videoRef.current || !canvasRef.current) {
-        throw new Error('Video or canvas element not ready');
-      }
-
-      // Create new HandTracker instance
-      handTrackerRef.current = new HandTracker();
-      
-      // Set sensitivity
-      handTrackerRef.current.adjustSensitivity(sensitivity);
-      
-      // Set up tap detection callback
-      handTrackerRef.current.setTapCallback((tapEvent) => {
-        if (isRunning) {
-          console.log('👆 Tap detected!', tapEvent);
-          setTapCount(prev => prev + 1);
-          setTapTimes(prev => [...prev, tapEvent.timestamp]);
-          
-          // Update real-time metrics
-          setRealTimeMetrics(prev => ({
-            ...prev,
-            currentSpeed: Math.round(((tapCount + 1) / Math.max((10 - timeRemaining), 1)) * 10) / 10,
-            lastTapTime: tapEvent.timestamp
-          }));
-        }
-      });
-
-      // Initialize MediaPipe
-      const success = await handTrackerRef.current.initialize(
-        videoRef.current,
-        canvasRef.current,
-        onResults
-      );
-
-      if (success) {
-        await handTrackerRef.current.start();
-        setCameraReady(true);
-        setMediaPipeReady(true);
-        setIsInitializing(false);
-        return true;
-      }
-      
-      throw new Error('MediaPipe initialization returned false');
-      
-    } catch (error) {
-      console.error('❌ Setup failed:', error);
-      setInitializationError(error.message);
-      setIsInitializing(false);
-      setCameraReady(false);
-      setMediaPipeReady(false);
-      return false;
-    }
-  };
-
   const startTest = async () => {
     console.log('🏁 Starting test...');
     
-    // Initialize MediaPipe if not ready
-    if (!mediaPipeReady) {
-      const setupSuccess = await setupCamera();
-      if (!setupSuccess) {
-        console.error('❌ Cannot start test - setup failed');
+    adjustSensitivity(sensitivity);
+    
+    if (!cameraReady) {
+      const success = await startCamera();
+      if (!success) {
+        console.error('❌ Cannot start test - camera failed');
         return;
       }
     }
     
-    // Reset test data
     setTapCount(0);
     setTapTimes([]);
     setTimeRemaining(10);
     setIsRunning(true);
     setTestPhase('testing');
+    
+    lastFingerTipY.current = null;
+    lastTapTime.current = 0;
     
     console.log('⏰ Test started - start tapping!');
   };
@@ -480,16 +306,9 @@ export default function FingerTapTest({ onBack }) {
   const stopTest = () => {
     console.log('⏹️ Stopping test...');
     setIsRunning(false);
+    stopCamera();
     
-    // Stop hand tracking
-    if (handTrackerRef.current) {
-      handTrackerRef.current.stop();
-    }
-    
-    // Calculate results
     const results = calculateResults();
-    
-    // Store results for current hand
     setTestResults(prev => ({
       ...prev,
       [currentHand + 'Hand']: results
@@ -497,7 +316,6 @@ export default function FingerTapTest({ onBack }) {
     
     console.log('📊 Test results:', results);
     
-    // Check if we need to test the other hand
     if (currentHand === 'right' && !testResults.leftHand) {
       setTestPhase('switchHands');
     } else {
@@ -575,10 +393,7 @@ export default function FingerTapTest({ onBack }) {
   const resetTest = () => {
     console.log('🔄 Resetting test...');
     
-    if (handTrackerRef.current) {
-      handTrackerRef.current.stop();
-      handTrackerRef.current = null;
-    }
+    stopCamera();
     
     setTestPhase('setup');
     setCurrentHand('right');
@@ -593,19 +408,12 @@ export default function FingerTapTest({ onBack }) {
     setCurrentHandedness('Unknown');
     setInitializationError(null);
     setIsInitializing(false);
-    setRealTimeMetrics({
-      currentSpeed: 0,
-      lastTapTime: 0,
-      handStability: 'Unknown'
-    });
   };
 
-  // Cleanup effect
+  // Cleanup
   useEffect(() => {
     return () => {
-      if (handTrackerRef.current) {
-        handTrackerRef.current.stop();
-      }
+      stopCamera();
     };
   }, []);
 
@@ -797,7 +605,7 @@ export default function FingerTapTest({ onBack }) {
             {handDetected ? (
               <div className="bg-green-900/70 px-3 py-2 rounded text-green-300">
                 <div className="font-semibold">✋ {currentHandedness} Hand Tracked</div>
-                <div className="text-sm">Stability: {realTimeMetrics.handStability}</div>
+                <div className="text-sm">Ready for tapping</div>
               </div>
             ) : (
               <div className="bg-red-900/70 px-3 py-2 rounded text-red-300">
@@ -812,7 +620,7 @@ export default function FingerTapTest({ onBack }) {
             <div className="text-3xl font-bold">{tapCount}</div>
             <div className="text-sm">taps detected</div>
             <div className="text-blue-400 text-sm">
-              {realTimeMetrics.currentSpeed.toFixed(1)} taps/sec
+              {(tapCount / Math.max(10 - timeRemaining, 1)).toFixed(1)} taps/sec
             </div>
             {timeRemaining <= 3 && timeRemaining > 0 && (
               <div className="text-red-400 text-xs font-bold animate-pulse mt-1">
@@ -822,7 +630,7 @@ export default function FingerTapTest({ onBack }) {
           </div>
 
           {/* Instructions overlay */}
-          {!handDetected && mediaPipeReady && (
+          {!handDetected && cameraReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
               <div className="text-center text-white p-6 bg-black/70 rounded-lg">
                 <div className="text-6xl mb-4">🤚</div>
@@ -916,20 +724,6 @@ export default function FingerTapTest({ onBack }) {
             <div className="bg-white border border-gray-200 p-6 rounded-lg">
               <h3 className="text-lg font-semibold text-blue-600 mb-4">Right Hand Analysis</h3>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-center">
-                  <div className="bg-blue-50 p-3 rounded">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {testResults.rightHand.tapCount}
-                    </div>
-                    <div className="text-xs text-gray-500">AI Detected</div>
-                  </div>
-                  <div className="bg-green-50 p-3 rounded">
-                    <div className="text-2xl font-bold text-green-600">
-                      {testResults.rightHand.tapsPerSecond}
-                    </div>
-                    <div className="text-xs text-gray-500">Taps/Second</div>
-                  </div>
-                </div>
                 <div className="text-center">
                   <div className="text-lg font-semibold text-purple-600">
                     {testResults.rightHand.consistency}
