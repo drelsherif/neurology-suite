@@ -20,13 +20,18 @@ export default function FingerTapTest({ onBack }) {
     leftHand: null
   });
   
+  // Preloading states
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
+  const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
+  const [isPreloading, setIsPreloading] = useState(true);
+  const [preloadError, setPreloadError] = useState(null);
+  const [preloadLog, setPreloadLog] = useState([]);
+  
   // MediaPipe states
   const [cameraReady, setCameraReady] = useState(false);
   const [handDetected, setHandDetected] = useState(false);
   const [currentHandedness, setCurrentHandedness] = useState('Unknown');
   const [mediaPipeReady, setMediaPipeReady] = useState(false);
-  const [initializationError, setInitializationError] = useState(null);
-  const [isInitializing, setIsInitializing] = useState(false);
   
   // Settings
   const [sensitivity, setSensitivity] = useState('normal');
@@ -36,6 +41,147 @@ export default function FingerTapTest({ onBack }) {
   const lastTapTime = useRef(0);
   const tapThreshold = useRef(25);
   const minTapInterval = useRef(150);
+
+  const addPreloadLog = (message) => {
+    const timestamp = new Date().toLocaleTimeString();
+    console.log(`[${timestamp}] ${message}`);
+    setPreloadLog(prev => [...prev, `[${timestamp}] ${message}`]);
+  };
+
+  // Preload everything on component mount
+  useEffect(() => {
+    preloadEverything();
+  }, []);
+
+  const preloadEverything = async () => {
+    try {
+      addPreloadLog('🚀 Starting preload process...');
+      setIsPreloading(true);
+      setPreloadError(null);
+
+      // Step 1: Request camera permissions immediately
+      addPreloadLog('📷 Requesting camera permissions...');
+      await requestCameraPermissions();
+      
+      // Step 2: Load MediaPipe scripts
+      addPreloadLog('📦 Loading MediaPipe scripts...');
+      await loadMediaPipeScripts();
+      
+      // Step 3: Initialize MediaPipe (but don't start camera yet)
+      addPreloadLog('🤖 Pre-initializing MediaPipe...');
+      await initializeMediaPipe();
+      
+      addPreloadLog('✅ Preload complete - ready for testing!');
+      setIsPreloading(false);
+      
+    } catch (error) {
+      addPreloadLog(`❌ Preload failed: ${error.message}`);
+      setPreloadError(error.message);
+      setIsPreloading(false);
+    }
+  };
+
+  const requestCameraPermissions = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API not supported in this browser');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: 640, 
+          height: 480,
+          facingMode: 'user' 
+        } 
+      });
+      
+      addPreloadLog('✅ Camera permission granted');
+      setCameraPermissionGranted(true);
+      
+      // Stop the test stream - we just wanted permission
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch (error) {
+      let errorMessage = 'Camera access failed: ';
+      if (error.name === 'NotAllowedError') {
+        errorMessage += 'Permission denied. Please allow camera access and refresh.';
+      } else if (error.name === 'NotFoundError') {
+        errorMessage += 'No camera found.';
+      } else {
+        errorMessage += error.message;
+      }
+      throw new Error(errorMessage);
+    }
+  };
+
+  const loadMediaPipeScripts = async () => {
+    const scripts = [
+      'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js'
+    ];
+
+    for (const src of scripts) {
+      if (!document.querySelector(`script[src="${src}"]`)) {
+        addPreloadLog(`⬇️ Loading: ${src.split('/').pop()}`);
+        await loadScript(src);
+        addPreloadLog(`✅ Loaded: ${src.split('/').pop()}`);
+      } else {
+        addPreloadLog(`♻️ Already loaded: ${src.split('/').pop()}`);
+      }
+    }
+    
+    // Wait for MediaPipe to be available
+    let attempts = 0;
+    while (typeof window.Hands === 'undefined' && attempts < 50) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+      if (attempts % 10 === 0) {
+        addPreloadLog(`⏳ Waiting for MediaPipe... (${attempts}/50)`);
+      }
+    }
+    
+    if (typeof window.Hands === 'undefined') {
+      throw new Error('MediaPipe failed to load after timeout');
+    }
+    
+    addPreloadLog('✅ MediaPipe scripts loaded successfully');
+    setMediaPipeLoaded(true);
+  };
+
+  const loadScript = (src) => {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(script);
+    });
+  };
+
+  const initializeMediaPipe = async () => {
+    try {
+      // Pre-create MediaPipe instance (but don't start camera)
+      handsRef.current = new window.Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      });
+
+      handsRef.current.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5,
+      });
+
+      // Set up results callback (will be used later)
+      handsRef.current.onResults(onResults);
+
+      addPreloadLog('✅ MediaPipe pre-initialized');
+      return true;
+    } catch (error) {
+      throw new Error(`MediaPipe initialization failed: ${error.message}`);
+    }
+  };
 
   // Adjust sensitivity
   const adjustSensitivity = useCallback((sens) => {
@@ -175,44 +321,14 @@ export default function FingerTapTest({ onBack }) {
     }
   }, [detectTap]);
 
-  // Simple camera setup - use existing MediaPipe
-  const setupCamera = async () => {
+  // Start camera when test begins
+  const startCamera = async () => {
     try {
-      setIsInitializing(true);
-      setInitializationError(null);
-      
-      console.log('🚀 Setting up camera with existing MediaPipe...');
-
-      // Check if MediaPipe is already loaded
-      if (typeof window.Hands === 'undefined' || typeof window.Camera === 'undefined') {
-        throw new Error('MediaPipe not loaded. Please refresh the page.');
+      if (!handsRef.current) {
+        throw new Error('MediaPipe not ready');
       }
 
-      console.log('✅ MediaPipe found');
-
-      // Request camera permission
-      await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480, facingMode: 'user' } 
-      }).then(stream => {
-        stream.getTracks().forEach(track => track.stop());
-        console.log('✅ Camera permission granted');
-      });
-
-      // Initialize MediaPipe Hands
-      handsRef.current = new window.Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-      });
-
-      handsRef.current.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.5,
-      });
-
-      handsRef.current.onResults(onResults);
-
-      // Initialize camera
+      // Create camera instance
       cameraRef.current = new window.Camera(videoRef.current, {
         onFrame: async () => {
           if (videoRef.current && handsRef.current) {
@@ -223,25 +339,6 @@ export default function FingerTapTest({ onBack }) {
         height: 480,
       });
 
-      console.log('✅ Camera initialized');
-      setIsInitializing(false);
-      return true;
-
-    } catch (error) {
-      console.error('❌ Setup failed:', error);
-      setInitializationError(error.message);
-      setIsInitializing(false);
-      return false;
-    }
-  };
-
-  const startCamera = async () => {
-    try {
-      if (!cameraRef.current) {
-        const success = await setupCamera();
-        if (!success) return false;
-      }
-      
       await cameraRef.current.start();
       setCameraReady(true);
       setMediaPipeReady(true);
@@ -249,8 +346,7 @@ export default function FingerTapTest({ onBack }) {
       return true;
     } catch (error) {
       console.error('❌ Camera start failed:', error);
-      setInitializationError(error.message);
-      return false;
+      throw error;
     }
   };
 
@@ -258,6 +354,7 @@ export default function FingerTapTest({ onBack }) {
     if (cameraRef.current) {
       cameraRef.current.stop();
       setCameraReady(false);
+      setMediaPipeReady(false);
     }
   };
 
@@ -279,28 +376,28 @@ export default function FingerTapTest({ onBack }) {
   }, [isRunning, timeRemaining]);
 
   const startTest = async () => {
-    console.log('🏁 Starting test...');
-    
-    adjustSensitivity(sensitivity);
-    
-    if (!cameraReady) {
-      const success = await startCamera();
-      if (!success) {
-        console.error('❌ Cannot start test - camera failed');
-        return;
-      }
+    try {
+      console.log('🏁 Starting test...');
+      
+      adjustSensitivity(sensitivity);
+      
+      // Start camera (MediaPipe already loaded)
+      await startCamera();
+      
+      setTapCount(0);
+      setTapTimes([]);
+      setTimeRemaining(10);
+      setIsRunning(true);
+      setTestPhase('testing');
+      
+      lastFingerTipY.current = null;
+      lastTapTime.current = 0;
+      
+      console.log('⏰ Test started - start tapping!');
+    } catch (error) {
+      console.error('❌ Test start failed:', error);
+      alert(`Test failed to start: ${error.message}`);
     }
-    
-    setTapCount(0);
-    setTapTimes([]);
-    setTimeRemaining(10);
-    setIsRunning(true);
-    setTestPhase('testing');
-    
-    lastFingerTipY.current = null;
-    lastTapTime.current = 0;
-    
-    console.log('⏰ Test started - start tapping!');
   };
 
   const stopTest = () => {
@@ -387,7 +484,6 @@ export default function FingerTapTest({ onBack }) {
     setHandDetected(false);
     setCameraReady(false);
     setMediaPipeReady(false);
-    setInitializationError(null);
   };
 
   const resetTest = () => {
@@ -406,8 +502,6 @@ export default function FingerTapTest({ onBack }) {
     setTapTimes([]);
     setIsRunning(false);
     setCurrentHandedness('Unknown');
-    setInitializationError(null);
-    setIsInitializing(false);
   };
 
   // Cleanup
@@ -417,19 +511,172 @@ export default function FingerTapTest({ onBack }) {
     };
   }, []);
 
-  if (testPhase === 'setup') {
+  // Show preloading screen
+  if (isPreloading) {
     return (
       <div className="max-w-4xl mx-auto p-6">
         <div className="text-center space-y-6">
           <div className="w-24 h-24 mx-auto bg-blue-100 rounded-full flex items-center justify-center">
-            <span className="text-4xl">🤖</span>
+            <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
           </div>
           
           <div>
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">AI-Powered Finger Tap Test</h2>
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">Preparing AI Test...</h2>
             <p className="text-lg text-gray-600">
-              Real-time finger tracking with MediaPipe AI technology
+              Loading camera permissions and MediaPipe AI
             </p>
+          </div>
+
+          {/* Preload Status */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+            <div className={`p-4 rounded-lg border ${cameraPermissionGranted ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+              <div className="flex items-center">
+                <span className="text-2xl mr-3">{cameraPermissionGranted ? '✅' : '📷'}</span>
+                <div>
+                  <div className="font-semibold">Camera Permissions</div>
+                  <div className="text-sm">{cameraPermissionGranted ? 'Granted' : 'Requesting...'}</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className={`p-4 rounded-lg border ${mediaPipeLoaded ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+              <div className="flex items-center">
+                <span className="text-2xl mr-3">{mediaPipeLoaded ? '✅' : '🤖'}</span>
+                <div>
+                  <div className="font-semibold">MediaPipe AI</div>
+                  <div className="text-sm">{mediaPipeLoaded ? 'Loaded' : 'Loading...'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Preload Log */}
+          <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm max-h-48 overflow-y-auto text-left max-w-3xl mx-auto">
+            <h3 className="text-white font-semibold mb-2">Loading Progress:</h3>
+            {preloadLog.map((entry, index) => (
+              <div key={index} className="mb-1">{entry}</div>
+            ))}
+          </div>
+
+          {preloadError && (
+            <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-red-700 max-w-md mx-auto">
+              <div className="font-medium mb-1">⚠️ Preload Failed</div>
+              <div className="text-sm mb-3">{preloadError}</div>
+              <button 
+                onClick={() => {
+                  setPreloadError(null);
+                  setPreloadLog([]);
+                  preloadEverything();
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {onBack && (
+            <button onClick={onBack} className="text-gray-600 hover:text-gray-800 underline">
+              ← Back to Home
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Show preload error screen
+  if (preloadError && !isPreloading) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="text-center space-y-6">
+          <div className="w-24 h-24 mx-auto bg-red-100 rounded-full flex items-center justify-center">
+            <span className="text-4xl">❌</span>
+          </div>
+          
+          <div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">Setup Failed</h2>
+            <p className="text-lg text-gray-600 mb-4">
+              Unable to prepare the AI test environment
+            </p>
+            
+            <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-red-700 max-w-md mx-auto mb-6">
+              <div className="font-medium mb-1">Error Details:</div>
+              <div className="text-sm">{preloadError}</div>
+            </div>
+
+            <div className="space-y-4">
+              <button 
+                onClick={() => {
+                  setPreloadError(null);
+                  setPreloadLog([]);
+                  setIsPreloading(true);
+                  preloadEverything();
+                }}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                🔄 Try Again
+              </button>
+              
+              <div className="text-sm text-gray-600">
+                <p><strong>Common solutions:</strong></p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Refresh the page and allow camera permissions</li>
+                  <li>Check internet connection for MediaPipe loading</li>
+                  <li>Try a different browser (Chrome recommended)</li>
+                  <li>Ensure HTTPS connection for camera access</li>
+                </ul>
+              </div>
+
+              {onBack && (
+                <button onClick={onBack} className="text-gray-600 hover:text-gray-800 underline">
+                  ← Back to Home
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Normal test flow starts here (setup phase)
+  if (testPhase === 'setup') {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="text-center space-y-6">
+          <div className="w-24 h-24 mx-auto bg-green-100 rounded-full flex items-center justify-center">
+            <span className="text-4xl">🎉</span>
+          </div>
+          
+          <div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">AI Test Ready!</h2>
+            <p className="text-lg text-gray-600">
+              Camera permissions granted, MediaPipe AI loaded
+            </p>
+          </div>
+
+          {/* Ready Status */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+            <div className="p-4 rounded-lg border bg-green-50 border-green-200">
+              <div className="flex items-center">
+                <span className="text-2xl mr-3">✅</span>
+                <div>
+                  <div className="font-semibold text-green-800">Camera Ready</div>
+                  <div className="text-sm text-green-600">Permissions granted</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 rounded-lg border bg-green-50 border-green-200">
+              <div className="flex items-center">
+                <span className="text-2xl mr-3">✅</span>
+                <div>
+                  <div className="font-semibold text-green-800">MediaPipe AI</div>
+                  <div className="text-sm text-green-600">Fully loaded</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="bg-blue-50 border border-blue-200 p-6 rounded-lg text-left space-y-4 max-w-2xl mx-auto">
@@ -473,7 +720,7 @@ export default function FingerTapTest({ onBack }) {
             onClick={() => setTestPhase('instructions')}
             className="px-8 py-4 text-lg font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
-            Begin AI Test Setup
+            Begin AI Test ⚡
           </button>
 
           {onBack && (
@@ -533,30 +780,12 @@ export default function FingerTapTest({ onBack }) {
             Back
           </button>
           <button 
-            onClick={startTest} 
-            disabled={isInitializing}
-            className={`px-6 py-3 rounded-lg transition-colors ${
-              isInitializing 
-                ? 'bg-gray-400 text-gray-600 cursor-not-allowed' 
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+            onClick={startTest}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
-            {isInitializing ? 'Setting up AI...' : 'Start AI Tracking Test'}
+            Start AI Tracking Test ⚡
           </button>
         </div>
-
-        {initializationError && (
-          <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-red-700 max-w-md mx-auto">
-            <div className="font-medium mb-1">⚠️ Setup Failed</div>
-            <div className="text-sm">{initializationError}</div>
-            <button 
-              onClick={() => setInitializationError(null)} 
-              className="text-red-600 text-sm underline mt-2"
-            >
-              Try Again
-            </button>
-          </div>
-        )}
       </div>
     );
   }
@@ -593,10 +822,10 @@ export default function FingerTapTest({ onBack }) {
           {/* Status indicators */}
           <div className="absolute top-4 right-4 space-y-2">
             <div className={`flex items-center px-3 py-1 rounded text-sm ${cameraReady ? 'bg-green-900/70 text-green-300' : 'bg-red-900/70 text-red-300'}`}>
-              {cameraReady ? '📷 Camera Ready' : '📷 Loading...'}
+              {cameraReady ? '📷 Camera Ready' : '📷 Starting...'}
             </div>
             <div className={`flex items-center px-3 py-1 rounded text-sm ${mediaPipeReady ? 'bg-blue-900/70 text-blue-300' : 'bg-yellow-900/70 text-yellow-300'}`}>
-              {mediaPipeReady ? '🤖 AI Ready' : '🤖 AI Loading'}
+              {mediaPipeReady ? '🤖 AI Ready' : '🤖 AI Starting'}
             </div>
           </div>
 
@@ -724,6 +953,20 @@ export default function FingerTapTest({ onBack }) {
             <div className="bg-white border border-gray-200 p-6 rounded-lg">
               <h3 className="text-lg font-semibold text-blue-600 mb-4">Right Hand Analysis</h3>
               <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4 text-center">
+                  <div className="bg-blue-50 p-3 rounded">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {testResults.rightHand.tapCount}
+                    </div>
+                    <div className="text-xs text-gray-500">AI Detected</div>
+                  </div>
+                  <div className="bg-green-50 p-3 rounded">
+                    <div className="text-2xl font-bold text-green-600">
+                      {testResults.rightHand.tapsPerSecond}
+                    </div>
+                    <div className="text-xs text-gray-500">Taps/Second</div>
+                  </div>
+                </div>
                 <div className="text-center">
                   <div className="text-lg font-semibold text-purple-600">
                     {testResults.rightHand.consistency}
