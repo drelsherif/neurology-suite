@@ -12,48 +12,75 @@ export default function EyeTrackingTest({ onBack }) {
   const [blinkDetected, setBlinkDetected] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [debugLog, setDebugLog] = useState([]);
+
+  const log = (msg) => {
+    console.log(msg);
+    setDebugLog(prev => [...prev.slice(-10), msg]);
+  };
 
   useEffect(() => {
     const videoElement = videoRef.current;
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext('2d');
 
-    console.log('[🟡] Initializing MediaPipe...');
-    const faceMesh = getFaceMesh();
-    faceMeshRef.current = faceMesh;
+    const waitForVideoReady = () => {
+      return new Promise((resolve, reject) => {
+        const check = () => {
+          if (videoElement && videoElement.videoWidth > 0) {
+            resolve();
+          } else {
+            requestAnimationFrame(check);
+          }
+        };
+        check();
+      });
+    };
 
-    faceMesh.onResults((results) => {
-      console.log('[🟢] MediaPipe received results:', results);
-      setLoading(false);
+    const initialize = async () => {
+      log('[🟡] Initializing MediaPipe and camera...');
 
-      if (!canvasElement || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
-        setFaceDetected(false);
-        return;
-      }
+      const faceMesh = getFaceMesh();
+      faceMeshRef.current = faceMesh;
 
-      setFaceDetected(true);
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.strokeStyle = '#00FF00';
-      canvasCtx.lineWidth = 1;
-
-      results.multiFaceLandmarks.forEach((landmarks) => {
-        for (let i = 0; i < landmarks.length; i++) {
-          const pt = landmarks[i];
-          const x = pt.x * canvasElement.width;
-          const y = pt.y * canvasElement.height;
-          canvasCtx.beginPath();
-          canvasCtx.arc(x, y, 2, 0, 2 * Math.PI);
-          canvasCtx.stroke();
+      faceMesh.onResults((results) => {
+        setLoading(false);
+        log('[🟢] MediaPipe received results');
+        if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+          setFaceDetected(false);
+          return;
         }
+
+        setFaceDetected(true);
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.strokeStyle = '#00FF00';
+        canvasCtx.lineWidth = 1;
+
+        results.multiFaceLandmarks.forEach((landmarks) => {
+          for (let i = 0; i < landmarks.length; i++) {
+            const pt = landmarks[i];
+            const x = pt.x * canvasElement.width;
+            const y = pt.y * canvasElement.height;
+            canvasCtx.beginPath();
+            canvasCtx.arc(x, y, 2, 0, 2 * Math.PI);
+            canvasCtx.stroke();
+          }
+        });
+
+        canvasCtx.restore();
       });
 
-      canvasCtx.restore();
-    });
+      await waitForVideoReady();
+      log('[📷] Video is ready. Starting frame stream to MediaPipe.');
 
-    getOrCreateCamera(videoElement, async () => {
-      await faceMesh.send({ image: videoElement });
-    });
+      getOrCreateCamera(videoElement, async () => {
+        log('[📸] Sending frame to MediaPipe...');
+        await faceMesh.send({ image: videoElement });
+      });
+    };
+
+    initialize();
 
     return () => {
       stopCamera();
@@ -86,6 +113,9 @@ export default function EyeTrackingTest({ onBack }) {
         <p>Gaze: {gazeDirection}</p>
         <p>Blink: {blinkDetected ? 'Yes' : 'No'}</p>
         {loading && <p className="text-yellow-400">Loading MediaPipe...</p>}
+      </div>
+      <div className="absolute bottom-2 left-2 z-40 w-[90%] max-h-[30%] overflow-y-auto text-xs bg-white/80 text-black p-1 rounded">
+        {debugLog.map((msg, i) => <div key={i}>{msg}</div>)}
       </div>
     </div>
   );
