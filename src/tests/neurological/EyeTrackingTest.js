@@ -153,22 +153,33 @@ export default function EyeMovementTest({ onBack }) {
 
   const initializeMediaPipe = async () => {
     try {
+      console.log('Initializing MediaPipe Face Mesh...');
+      
+      if (!window.FaceMesh) {
+        throw new Error('FaceMesh not available on window object');
+      }
+      
       faceMeshRef.current = new window.FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+        locateFile: (file) => {
+          console.log('MediaPipe loading file:', file);
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        },
       });
 
       faceMeshRef.current.setOptions({
         maxNumFaces: 1,
         refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
+        minDetectionConfidence: 0.3, // Lower threshold for easier detection
+        minTrackingConfidence: 0.3,  // Lower threshold for easier detection
         selfieMode: true
       });
 
       faceMeshRef.current.onResults(onResults);
-      addPreloadLog('✅ Face Mesh configured');
+      addPreloadLog('✅ Face Mesh configured with low thresholds');
+      console.log('MediaPipe Face Mesh initialized successfully');
       return true;
     } catch (error) {
+      console.error('MediaPipe initialization error:', error);
       throw new Error(`Face Mesh initialization failed: ${error.message}`);
     }
   };
@@ -275,19 +286,28 @@ export default function EyeMovementTest({ onBack }) {
     canvas.height = 480;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Debug: Draw a test circle to verify canvas is working
+    ctx.beginPath();
+    ctx.arc(50, 50, 20, 0, 2 * Math.PI);
+    ctx.fillStyle = '#00FF00';
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '12px Arial';
+    ctx.fillText('Canvas OK', 80, 55);
+
+    console.log('MediaPipe results:', results); // Debug log
+
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
       const landmarks = results.multiFaceLandmarks[0];
+      console.log('Face detected! Landmarks:', landmarks.length); // Debug log
       setFaceDetected(true);
 
-      // Draw face mesh (minimal) - only if drawing utils are available
-      if (window.drawConnectors && window.FACEMESH_TESSELATION) {
-        window.drawConnectors(ctx, landmarks, window.FACEMESH_TESSELATION, {
-          color: '#C0C0C070',
-          lineWidth: 1
-        });
-      }
+      // Draw simple face outline first (basic circles for eyes, etc.)
+      ctx.fillStyle = '#00FF00';
+      ctx.font = 'bold 20px Arial';
+      ctx.fillText('FACE DETECTED!', canvas.width / 2 - 80, 100);
 
-      // Always draw eye regions even if drawing utils aren't available
+      // Draw eye regions
       drawEyeRegions(ctx, landmarks);
       
       // Calculate and update metrics
@@ -306,13 +326,15 @@ export default function EyeMovementTest({ onBack }) {
       }
       
     } else {
+      console.log('No face detected in frame'); // Debug log
       setFaceDetected(false);
       // Draw "no face detected" message
-      ctx.fillStyle = '#FFFF00';
+      ctx.fillStyle = '#FF0000';
       ctx.font = 'bold 16px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText('Please position your face in the camera', canvas.width / 2, canvas.height / 2);
-      ctx.fillText('Make sure you are well-lit and facing the camera', canvas.width / 2, canvas.height / 2 + 30);
+      ctx.fillText('NO FACE DETECTED', canvas.width / 2, canvas.height / 2);
+      ctx.fillText('Position face in camera view', canvas.width / 2, canvas.height / 2 + 30);
+      ctx.fillText('Ensure good lighting', canvas.width / 2, canvas.height / 2 + 60);
       ctx.textAlign = 'left';
     }
   }, [calculateEyeMetrics, currentDirection]);
@@ -402,10 +424,29 @@ export default function EyeMovementTest({ onBack }) {
 
       addPreloadLog('📷 Starting camera...');
       
+      // First get user media directly to test camera
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: 640, 
+          height: 480,
+          facingMode: 'user' 
+        } 
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        addPreloadLog('✅ Video stream connected');
+      }
+
+      // Then initialize MediaPipe Camera
       cameraRef.current = new window.Camera(videoRef.current, {
         onFrame: async () => {
           if (videoRef.current && faceMeshRef.current) {
-            await faceMeshRef.current.send({ image: videoRef.current });
+            try {
+              await faceMeshRef.current.send({ image: videoRef.current });
+            } catch (error) {
+              console.error('MediaPipe send error:', error);
+            }
           }
         },
         width: 640,
@@ -413,7 +454,7 @@ export default function EyeMovementTest({ onBack }) {
       });
 
       await cameraRef.current.start();
-      addPreloadLog('✅ Camera started successfully');
+      addPreloadLog('✅ MediaPipe camera started');
       setCameraReady(true);
       setMediaPipeReady(true);
       return true;
@@ -768,14 +809,14 @@ export default function EyeMovementTest({ onBack }) {
           <p className="text-lg text-gray-600">Position yourself for optimal eye tracking</p>
         </div>
 
-        {/* Camera feed with eye tracking overlay */}
-        <div className="relative bg-gray-900 rounded-lg overflow-hidden">
+        {/* Camera feed with eye tracking overlay - iPhone optimized */}
+        <div className="relative bg-gray-900 rounded-lg overflow-hidden max-w-md mx-auto">
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="w-full h-80 object-cover"
+            className="w-full h-64 object-cover"
             style={{ transform: 'scaleX(-1)' }}
           />
           <canvas
@@ -793,106 +834,101 @@ export default function EyeMovementTest({ onBack }) {
             style={{ transform: 'scaleX(-1)' }}
           />
           
-          {/* Status indicators */}
-          <div className="absolute top-4 right-4 space-y-2">
-            <div className={`flex items-center px-3 py-1 rounded text-sm ${cameraReady ? 'bg-green-900/70 text-green-300' : 'bg-red-900/70 text-red-300'}`}>
-              {cameraReady ? '📷 Camera Ready' : '📷 Starting...'}
+          {/* Status indicators - iPhone sized */}
+          <div className="absolute top-2 right-2 space-y-1">
+            <div className={`flex items-center px-2 py-1 rounded text-xs ${cameraReady ? 'bg-green-900/70 text-green-300' : 'bg-red-900/70 text-red-300'}`}>
+              {cameraReady ? '📷 Ready' : '📷 Starting...'}
             </div>
-            <div className={`flex items-center px-3 py-1 rounded text-sm ${mediaPipeReady ? 'bg-purple-900/70 text-purple-300' : 'bg-yellow-900/70 text-yellow-300'}`}>
-              {mediaPipeReady ? '👁️ Eye AI Ready' : '👁️ Loading...'}
+            <div className={`flex items-center px-2 py-1 rounded text-xs ${mediaPipeReady ? 'bg-purple-900/70 text-purple-300' : 'bg-yellow-900/70 text-yellow-300'}`}>
+              {mediaPipeReady ? '👁️ AI Ready' : '👁️ Loading...'}
             </div>
           </div>
 
-          {/* Face detection status */}
-          <div className="absolute bottom-4 right-4">
+          {/* Face detection status - iPhone sized */}
+          <div className="absolute bottom-2 right-2">
             {faceDetected ? (
-              <div className="bg-green-900/70 px-3 py-2 rounded text-green-300">
-                <div className="font-semibold">😊 Face Tracked</div>
-                <div className="text-sm">Eyes detected</div>
+              <div className="bg-green-900/70 px-2 py-1 rounded text-green-300 text-xs">
+                <div className="font-semibold">😊 Face OK</div>
               </div>
             ) : (
-              <div className="bg-red-900/70 px-3 py-2 rounded text-red-300">
-                <div className="font-semibold">🔍 Position your face</div>
-                <div className="text-sm">Look directly at camera</div>
+              <div className="bg-red-900/70 px-2 py-1 rounded text-red-300 text-xs">
+                <div className="font-semibold">🔍 Position face</div>
               </div>
             )}
           </div>
           
-          {/* Real-time eye metrics */}
-          <div className="absolute top-4 left-4 bg-black/90 px-4 py-3 rounded text-white">
-            <div className="text-sm font-semibold text-purple-400 mb-2">Live Eye Metrics</div>
-            <div className="text-xs space-y-1">
-              <div>Gaze: <span className="text-cyan-400">{realTimeMetrics.gazeDirection}</span></div>
-              <div>Skew: <span className="text-yellow-400">{realTimeMetrics.skewAngle}°</span></div>
-              <div>Face: <span className={faceDetected ? "text-green-400" : "text-red-400"}>
-                {faceDetected ? "✅ Detected" : "❌ Not Found"}
+          {/* Real-time eye metrics - iPhone sized */}
+          <div className="absolute top-2 left-2 bg-black/90 px-2 py-1 rounded text-white text-xs">
+            <div className="font-semibold text-purple-400 mb-1">Debug</div>
+            <div className="space-y-0.5">
+              <div>AI: <span className={mediaPipeReady ? "text-green-400" : "text-red-400"}>
+                {mediaPipeReady ? "✅" : "❌"}
               </span></div>
-              {realTimeMetrics.blinkDetected && (
-                <div className="text-red-400 animate-pulse">👁️ Blink detected</div>
-              )}
+              <div>Face: <span className={faceDetected ? "text-green-400" : "text-red-400"}>
+                {faceDetected ? "✅" : "❌"}
+              </span></div>
+              <div>Gaze: <span className="text-cyan-400">{realTimeMetrics.gazeDirection}</span></div>
             </div>
           </div>
 
           {/* Instructions overlay */}
           {!faceDetected && cameraReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="text-center text-white p-6 bg-black/70 rounded-lg">
-                <div className="text-6xl mb-4">😊</div>
-                <p className="text-xl font-semibold mb-2">Position Your Face</p>
-                <p className="text-sm text-gray-300">Look directly at the camera for eye tracking</p>
+              <div className="text-center text-white p-4 bg-black/70 rounded-lg">
+                <div className="text-4xl mb-2">😊</div>
+                <p className="text-lg font-semibold mb-1">Position Your Face</p>
+                <p className="text-xs text-gray-300">Look directly at camera</p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white border border-gray-200 p-6 rounded-lg">
-            <h3 className="text-lg font-semibold text-purple-600 mb-4">Positioning Guidelines</h3>
-            <div className="space-y-3 text-sm text-gray-700">
-              <p>• Sit 1-2 feet from the camera</p>
-              <p>• Keep your face well-lit and clearly visible</p>
-              <p>• Look directly at the camera lens</p>
-              <p>• Keep your head relatively still</p>
-              <p>• Remove glasses if possible for better tracking</p>
+        <div className="space-y-4">
+          <div className="bg-white border border-gray-200 p-4 rounded-lg">
+            <h3 className="text-lg font-semibold text-purple-600 mb-3">iPhone Setup</h3>
+            <div className="space-y-2 text-sm text-gray-700">
+              <p>• Hold phone 1-2 feet from your face</p>
+              <p>• Use good lighting (face the light)</p>
+              <p>• Keep head still, move only eyes</p>
+              <p>• Remove glasses if possible</p>
             </div>
           </div>
 
-          <div className="bg-white border border-gray-200 p-6 rounded-lg">
-            <h3 className="text-lg font-semibold text-green-600 mb-4">Test Sequence</h3>
-            <div className="space-y-3 text-sm text-gray-700">
-              <p>• <strong>Baseline:</strong> Look straight at camera (3 seconds)</p>
-              <p>• <strong>Left:</strong> Look to your left (3 seconds)</p>
-              <p>• <strong>Right:</strong> Look to your right (3 seconds)</p>
-              <p>• <strong>Up:</strong> Look upward (3 seconds)</p>
-              <p>• <strong>Down:</strong> Look downward (3 seconds)</p>
+          <div className="bg-white border border-gray-200 p-4 rounded-lg">
+            <h3 className="text-lg font-semibold text-green-600 mb-3">Test Sequence</h3>
+            <div className="space-y-2 text-sm text-gray-700">
+              <p>• <strong>Center:</strong> Look at camera (3 sec)</p>
+              <p>• <strong>Left:</strong> Look left (3 sec)</p>
+              <p>• <strong>Right:</strong> Look right (3 sec)</p>
+              <p>• <strong>Up:</strong> Look up (3 sec)</p>
+              <p>• <strong>Down:</strong> Look down (3 sec)</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg max-w-3xl mx-auto">
+        <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
           <p className="text-yellow-800 text-sm">
-            <strong>⚠️ Important:</strong> Move only your eyes, not your head. The AI will track iris movements 
-            and analyze coordination between both eyes for neurological assessment.
+            <strong>⚠️ iPhone Tip:</strong> Hold steady and make sure the green "Face OK" shows before starting!
           </p>
         </div>
 
         <div className="flex space-x-4 justify-center">
           <button 
             onClick={() => setTestPhase('setup')} 
-            className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
           >
             Back
           </button>
           <button 
             onClick={beginRecording}
             disabled={!faceDetected}
-            className={`px-6 py-3 rounded-lg transition-colors ${
+            className={`px-4 py-2 rounded-lg transition-colors ${
               faceDetected 
                 ? 'bg-purple-600 text-white hover:bg-purple-700' 
                 : 'bg-gray-400 text-gray-600 cursor-not-allowed'
             }`}
           >
-            {faceDetected ? 'Start Eye Movement Test 👁️' : 'Position Face First'}
+            {faceDetected ? 'Start Test 👁️' : 'Position Face First'}
           </button>
         </div>
       </div>
@@ -901,11 +937,11 @@ export default function EyeMovementTest({ onBack }) {
 
   if (testPhase === 'testing') {
     return (
-      <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <div className="max-w-4xl mx-auto p-6 space-y-4">
         <div className="text-center">
-          <h2 className="text-3xl font-bold text-gray-800 mb-2">Eye Movement Assessment</h2>
-          <div className="text-6xl font-bold text-purple-600 mb-2">{timeRemaining}</div>
-          <p className="text-2xl font-semibold text-gray-700 mb-2">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Eye Movement Assessment</h2>
+          <div className="text-5xl font-bold text-purple-600 mb-2">{timeRemaining}</div>
+          <p className="text-lg font-semibold text-gray-700 mb-2">
             {directionInstructions[currentDirection]}
           </p>
           <div className="flex items-center justify-center space-x-2">
@@ -918,45 +954,45 @@ export default function EyeMovementTest({ onBack }) {
           </div>
         </div>
 
-        {/* Direction indicator */}
-        <div className="relative w-32 h-32 mx-auto bg-gray-200 rounded-full">
+        {/* Direction indicator - iPhone optimized */}
+        <div className="relative w-24 h-24 mx-auto bg-gray-200 rounded-full">
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-16 h-16 bg-gray-400 rounded-full flex items-center justify-center">
-              <span className="text-2xl">👁️</span>
+            <div className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center">
+              <span className="text-xl">👁️</span>
             </div>
           </div>
           
           {/* Direction arrows */}
           {currentDirection === 'left' && (
-            <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-4xl text-purple-600">
+            <div className="absolute left-1 top-1/2 transform -translate-y-1/2 text-3xl text-purple-600">
               ←
             </div>
           )}
           {currentDirection === 'right' && (
-            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-4xl text-purple-600">
+            <div className="absolute right-1 top-1/2 transform -translate-y-1/2 text-3xl text-purple-600">
               →
             </div>
           )}
           {currentDirection === 'up' && (
-            <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-4xl text-purple-600">
+            <div className="absolute top-1 left-1/2 transform -translate-x-1/2 text-3xl text-purple-600">
               ↑
             </div>
           )}
           {currentDirection === 'down' && (
-            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 text-4xl text-purple-600">
+            <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2 text-3xl text-purple-600">
               ↓
             </div>
           )}
         </div>
 
-        {/* Camera feed - smaller during test */}
-        <div className="relative bg-gray-900 rounded-lg overflow-hidden max-w-md mx-auto">
+        {/* Camera feed - iPhone optimized smaller */}
+        <div className="relative bg-gray-900 rounded-lg overflow-hidden max-w-sm mx-auto">
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="w-full h-48 object-cover"
+            className="w-full h-40 object-cover"
             style={{ transform: 'scaleX(-1)' }}
           />
           <canvas
@@ -967,16 +1003,16 @@ export default function EyeMovementTest({ onBack }) {
             style={{ transform: 'scaleX(-1)' }}
           />
           
-          {/* Live metrics overlay */}
-          <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-white text-xs">
+          {/* Live metrics overlay - iPhone sized */}
+          <div className="absolute top-1 left-1 bg-black/80 px-1 py-1 rounded text-white text-xs">
             <div>Gaze: {realTimeMetrics.gazeDirection}</div>
             <div>L: {realTimeMetrics.leftIrisRelative?.toFixed(2) || '0.00'}</div>
             <div>R: {realTimeMetrics.rightIrisRelative?.toFixed(2) || '0.00'}</div>
           </div>
         </div>
 
-        {/* Progress indicator */}
-        <div className="flex justify-center space-x-2">
+        {/* Progress indicator - iPhone optimized */}
+        <div className="flex justify-center space-x-1">
           {testSequence.map((direction, index) => {
             const currentIndex = testSequence.indexOf(currentDirection);
             let status = 'upcoming';
@@ -986,7 +1022,7 @@ export default function EyeMovementTest({ onBack }) {
             return (
               <div
                 key={direction}
-                className={`px-3 py-1 rounded text-sm font-semibold ${
+                className={`px-2 py-1 rounded text-xs font-semibold ${
                   status === 'completed' ? 'bg-green-200 text-green-800' :
                   status === 'current' ? 'bg-purple-200 text-purple-800' :
                   'bg-gray-200 text-gray-600'
