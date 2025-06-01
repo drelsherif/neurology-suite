@@ -161,10 +161,12 @@ export default function EyeMovementTest({ onBack }) {
         maxNumFaces: 1,
         refineLandmarks: true,
         minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        minTrackingConfidence: 0.5,
+        selfieMode: true
       });
 
       faceMeshRef.current.onResults(onResults);
+      addPreloadLog('✅ Face Mesh configured');
       return true;
     } catch (error) {
       throw new Error(`Face Mesh initialization failed: ${error.message}`);
@@ -277,7 +279,7 @@ export default function EyeMovementTest({ onBack }) {
       const landmarks = results.multiFaceLandmarks[0];
       setFaceDetected(true);
 
-      // Draw face mesh (minimal)
+      // Draw face mesh (minimal) - only if drawing utils are available
       if (window.drawConnectors && window.FACEMESH_TESSELATION) {
         window.drawConnectors(ctx, landmarks, window.FACEMESH_TESSELATION, {
           color: '#C0C0C070',
@@ -285,7 +287,7 @@ export default function EyeMovementTest({ onBack }) {
         });
       }
 
-      // Draw eye regions
+      // Always draw eye regions even if drawing utils aren't available
       drawEyeRegions(ctx, landmarks);
       
       // Calculate and update metrics
@@ -305,10 +307,12 @@ export default function EyeMovementTest({ onBack }) {
       
     } else {
       setFaceDetected(false);
+      // Draw "no face detected" message
       ctx.fillStyle = '#FFFF00';
       ctx.font = 'bold 16px Arial';
       ctx.textAlign = 'center';
       ctx.fillText('Please position your face in the camera', canvas.width / 2, canvas.height / 2);
+      ctx.fillText('Make sure you are well-lit and facing the camera', canvas.width / 2, canvas.height / 2 + 30);
       ctx.textAlign = 'left';
     }
   }, [calculateEyeMetrics, currentDirection]);
@@ -396,6 +400,8 @@ export default function EyeMovementTest({ onBack }) {
         throw new Error('Face Mesh not ready');
       }
 
+      addPreloadLog('📷 Starting camera...');
+      
       cameraRef.current = new window.Camera(videoRef.current, {
         onFrame: async () => {
           if (videoRef.current && faceMeshRef.current) {
@@ -407,10 +413,12 @@ export default function EyeMovementTest({ onBack }) {
       });
 
       await cameraRef.current.start();
+      addPreloadLog('✅ Camera started successfully');
       setCameraReady(true);
       setMediaPipeReady(true);
       return true;
     } catch (error) {
+      addPreloadLog(`❌ Camera start failed: ${error.message}`);
       console.error('❌ Camera start failed:', error);
       throw error;
     }
@@ -816,6 +824,9 @@ export default function EyeMovementTest({ onBack }) {
             <div className="text-xs space-y-1">
               <div>Gaze: <span className="text-cyan-400">{realTimeMetrics.gazeDirection}</span></div>
               <div>Skew: <span className="text-yellow-400">{realTimeMetrics.skewAngle}°</span></div>
+              <div>Face: <span className={faceDetected ? "text-green-400" : "text-red-400"}>
+                {faceDetected ? "✅ Detected" : "❌ Not Found"}
+              </span></div>
               {realTimeMetrics.blinkDetected && (
                 <div className="text-red-400 animate-pulse">👁️ Blink detected</div>
               )}
