@@ -201,44 +201,49 @@ export default function FingerTapTest({ onBack }) {
     console.log(`🎯 Mobile sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
   }, []);
 
-  // Debug tap detection - ANY movement should trigger
+  // Ultra-simple tap detection - catch 150px movements
   const detectTap = useCallback((landmarks) => {
-    if (!canvasRef.current) return;
+    console.log('🔍 detectTap called, isRunning:', isRunning);
+    
+    if (!canvasRef.current) {
+      console.log('❌ No canvas');
+      return;
+    }
     
     const indexTip = landmarks[8];
-    if (!indexTip) return;
+    if (!indexTip) {
+      console.log('❌ No index tip');
+      return;
+    }
 
     const tipY = indexTip.y * canvasRef.current.height;
+    console.log('📍 Current tipY:', tipY.toFixed(1));
     
-    // Log every frame for debugging
     if (lastFingerTipY.current !== null) {
-      const movement = tipY - lastFingerTipY.current;
-      const currentTime = Date.now();
+      const movement = Math.abs(tipY - lastFingerTipY.current);
+      console.log(`📏 Movement: ${movement.toFixed(1)}px`);
       
-      // Show ALL movements
-      if (Math.abs(movement) > 0.5) {
-        console.log(`🔍 ANY movement detected: ${movement.toFixed(2)}px, isRunning: ${isRunning}`);
-      }
-      
-      // SUPER sensitive detection - any movement > 1px
-      if (isRunning && 
-          Math.abs(movement) > 1 && 
-          currentTime - lastTapTime.current > 100) {
+      // If you're seeing 150px changes, let's catch them!
+      if (movement > 50) { // Much lower than 150
+        const currentTime = Date.now();
         
-        lastTapTime.current = currentTime;
-        
-        console.log('🎉 SUPER SENSITIVE TAP! Movement:', movement.toFixed(2));
-        
-        setTapCount(prevCount => {
-          const newCount = prevCount + 1;
-          console.log('📱 TAP COUNT UPDATED TO:', newCount);
-          return newCount;
-        });
-        
-        setTapTimes(prevTimes => [...prevTimes, currentTime]);
-        
-        // Big flash
-        flashFingerTip(indexTip);
+        // Ignore timing for now - just detect any big movement
+        if (currentTime - lastTapTime.current > 100) {
+          lastTapTime.current = currentTime;
+          
+          console.log('🎉🎉🎉 BIG MOVEMENT DETECTED!', movement.toFixed(1), 'px');
+          
+          // Force state update
+          setTapCount(prevCount => {
+            const newCount = prevCount + 1;
+            console.log('🔥 FORCE UPDATE TAP COUNT TO:', newCount);
+            alert(`TAP ${newCount} DETECTED! Movement: ${movement.toFixed(1)}px`); // Alert for iPhone
+            return newCount;
+          });
+          
+          // Flash
+          flashFingerTip(indexTip);
+        }
       }
     }
     
@@ -246,36 +251,45 @@ export default function FingerTapTest({ onBack }) {
   }, [isRunning]);
 
   const flashFingerTip = (indexTip) => {
-    if (!canvasRef.current) return;
+    console.log('💥💥💥 FLASH EFFECT STARTING!');
     
-    console.log('💥 iPhone flash effect triggered!');
+    if (!canvasRef.current) {
+      console.log('❌ No canvas for flash');
+      return;
+    }
     
     const ctx = canvasRef.current.getContext('2d');
     const x = indexTip.x * canvasRef.current.width;
     const y = indexTip.y * canvasRef.current.height;
     
-    // Much more visible flash for iPhone
+    console.log(`🎨 Drawing flash at ${x.toFixed(1)}, ${y.toFixed(1)}`);
+    
+    // MASSIVE flash for iPhone
     ctx.save();
+    
+    // Yellow center
     ctx.beginPath();
-    ctx.arc(x, y, 40, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(255, 255, 0, 0.95)';
+    ctx.arc(x, y, 60, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
     ctx.fill();
+    
+    // Red ring
+    ctx.beginPath();
+    ctx.arc(x, y, 80, 0, 2 * Math.PI);
     ctx.strokeStyle = 'rgba(255, 0, 0, 1)';
-    ctx.lineWidth = 8;
+    ctx.lineWidth = 10;
     ctx.stroke();
     
-    // Add second ring
+    // Green outer ring
     ctx.beginPath();
-    ctx.arc(x, y, 55, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
-    ctx.lineWidth = 4;
+    ctx.arc(x, y, 100, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(0, 255, 0, 1)';
+    ctx.lineWidth = 8;
     ctx.stroke();
     
     ctx.restore();
     
-    setTimeout(() => {
-      console.log('iPhone flash effect cleared');
-    }, 100);
+    console.log('✅ Flash drawn successfully');
   };
 
   // MediaPipe results handler
