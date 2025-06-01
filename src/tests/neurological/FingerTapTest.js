@@ -183,24 +183,25 @@ export default function FingerTapTest({ onBack }) {
     }
   };
 
-  // Adjust sensitivity
+  // Adjust sensitivity - Mobile-friendly defaults
   const adjustSensitivity = useCallback((sens) => {
     switch (sens) {
       case 'low':
-        tapThreshold.current = 35;
+        tapThreshold.current = 20; // Lower for mobile
         minTapInterval.current = 200;
         break;
       case 'high':
-        tapThreshold.current = 15;
+        tapThreshold.current = 8; // Much lower for mobile
         minTapInterval.current = 100;
         break;
-      default:
-        tapThreshold.current = 25;
+      default: // normal
+        tapThreshold.current = 15; // Lower than original 25
         minTapInterval.current = 150;
     }
+    console.log(`🎯 Sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
   }, []);
 
-  // Tap detection logic
+  // Tap detection logic - Fixed with refs to avoid stale closures
   const detectTap = useCallback((landmarks) => {
     if (!isRunning || !canvasRef.current) return;
     
@@ -228,13 +229,20 @@ export default function FingerTapTest({ onBack }) {
         
         lastTapTime.current = currentTime;
         
-        console.log('🎉 TAP DETECTED! Count:', tapCount + 1);
-        setTapCount(prev => {
-          const newCount = prev + 1;
+        console.log('🎉 TAP DETECTED!');
+        
+        // Use functional updates to avoid stale closure issues
+        setTapCount(prevCount => {
+          const newCount = prevCount + 1;
           console.log('📊 Updated tap count:', newCount);
           return newCount;
         });
-        setTapTimes(prev => [...prev, currentTime]);
+        
+        setTapTimes(prevTimes => {
+          const newTimes = [...prevTimes, currentTime];
+          console.log('⏰ Updated tap times:', newTimes.length);
+          return newTimes;
+        });
         
         // Visual feedback
         flashFingerTip(indexTip);
@@ -242,7 +250,7 @@ export default function FingerTapTest({ onBack }) {
     }
     
     lastFingerTipY.current = tipY;
-  }, [isRunning, tapCount]);
+  }, [isRunning]); // Remove tapCount from dependencies
 
   const flashFingerTip = (indexTip) => {
     if (!canvasRef.current) return;
@@ -934,7 +942,7 @@ export default function FingerTapTest({ onBack }) {
             )}
           </div>
           
-          {/* Performance overlay - Enhanced */}
+          {/* Performance overlay - Enhanced with debug info */}
           <div className="absolute top-4 left-4 bg-black/90 px-4 py-3 rounded text-white">
             <div className="text-3xl font-bold text-yellow-400">{tapCount}</div>
             <div className="text-sm">taps detected</div>
@@ -943,6 +951,9 @@ export default function FingerTapTest({ onBack }) {
             </div>
             <div className="text-xs text-gray-400 mt-1">
               Running: {isRunning ? 'YES' : 'NO'}
+            </div>
+            <div className="text-xs text-green-400">
+              Threshold: {tapThreshold.current}px
             </div>
             {timeRemaining <= 3 && timeRemaining > 0 && (
               <div className="text-red-400 text-xs font-bold animate-pulse mt-1">
