@@ -201,52 +201,43 @@ export default function FingerTapTest({ onBack }) {
     console.log(`🎯 Mobile sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
   }, []);
 
-  // Tap detection logic - iPhone optimized
+  // Debug tap detection - ANY movement should trigger
   const detectTap = useCallback((landmarks) => {
-    if (!isRunning || !canvasRef.current) return;
+    if (!canvasRef.current) return;
     
     const indexTip = landmarks[8];
-    const indexDip = landmarks[7];
-    const indexPip = landmarks[6];
-    
-    if (!indexTip || !indexDip || !indexPip) return;
+    if (!indexTip) return;
 
     const tipY = indexTip.y * canvasRef.current.height;
-    const dipY = indexDip.y * canvasRef.current.height;
-    const pipY = indexPip.y * canvasRef.current.height;
     
-    const fingerCurvature = (dipY + pipY) / 2 - tipY;
-    
+    // Log every frame for debugging
     if (lastFingerTipY.current !== null) {
       const movement = tipY - lastFingerTipY.current;
       const currentTime = Date.now();
       
-      // More lenient detection for iPhone
-      const isDownwardMovement = movement > tapThreshold.current;
-      const isTimingOk = currentTime - lastTapTime.current > minTapInterval.current;
-      const isFingerExtended = fingerCurvature < 60; // More lenient
+      // Show ALL movements
+      if (Math.abs(movement) > 0.5) {
+        console.log(`🔍 ANY movement detected: ${movement.toFixed(2)}px, isRunning: ${isRunning}`);
+      }
       
-      console.log(`📱 iPhone tap check: movement=${movement.toFixed(1)}px (need >${tapThreshold.current}), curvature=${fingerCurvature.toFixed(1)} (need <60), timing=${isTimingOk}`);
-      
-      if (isDownwardMovement && isFingerExtended && isTimingOk) {
+      // SUPER sensitive detection - any movement > 1px
+      if (isRunning && 
+          Math.abs(movement) > 1 && 
+          currentTime - lastTapTime.current > 100) {
+        
         lastTapTime.current = currentTime;
         
-        console.log('🎉 TAP DETECTED ON iPHONE!');
+        console.log('🎉 SUPER SENSITIVE TAP! Movement:', movement.toFixed(2));
         
-        // Use functional updates to avoid stale closure issues
         setTapCount(prevCount => {
           const newCount = prevCount + 1;
-          console.log('📊 iPhone tap count updated:', newCount);
+          console.log('📱 TAP COUNT UPDATED TO:', newCount);
           return newCount;
         });
         
-        setTapTimes(prevTimes => {
-          const newTimes = [...prevTimes, currentTime];
-          console.log('⏰ iPhone tap times updated:', newTimes.length);
-          return newTimes;
-        });
+        setTapTimes(prevTimes => [...prevTimes, currentTime]);
         
-        // Enhanced visual feedback for iPhone
+        // Big flash
         flashFingerTip(indexTip);
       }
     }
@@ -952,18 +943,21 @@ export default function FingerTapTest({ onBack }) {
             )}
           </div>
           
-          {/* Performance overlay - Enhanced with debug info */}
-          <div className="absolute top-4 left-4 bg-black/90 px-4 py-3 rounded text-white">
+          {/* Debug overlay - Show real-time data */}
+          <div className="absolute top-4 left-4 bg-black/95 px-4 py-3 rounded text-white">
             <div className="text-3xl font-bold text-yellow-400">{tapCount}</div>
             <div className="text-sm">taps detected</div>
             <div className="text-blue-400 text-sm">
               {(tapCount / Math.max(10 - timeRemaining, 1)).toFixed(1)} taps/sec
             </div>
             <div className="text-xs text-gray-400 mt-1">
-              Running: {isRunning ? 'YES' : 'NO'}
+              Running: {isRunning ? '✅ YES' : '❌ NO'}
             </div>
-            <div className="text-xs text-green-400">
-              Threshold: {tapThreshold.current}px
+            <div className="text-xs text-purple-400">
+              LastY: {lastFingerTipY.current ? lastFingerTipY.current.toFixed(1) : 'null'}
+            </div>
+            <div className="text-xs text-orange-400">
+              Canvas: {canvasRef.current ? `${canvasRef.current.width}x${canvasRef.current.height}` : 'null'}
             </div>
             {timeRemaining <= 3 && timeRemaining > 0 && (
               <div className="text-red-400 text-xs font-bold animate-pulse mt-1">
