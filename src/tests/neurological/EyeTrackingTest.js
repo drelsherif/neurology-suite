@@ -2,30 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 
-const TEST_MODES = {
-  standard: { label: 'Standard (3s)', duration: 3000 },
-  fast: { label: 'Fast (1.5s)', duration: 1500 },
-};
-
-const PROMPTS = ['center', 'left', 'right', 'up', 'down'];
-const OFFSETS = {
-  center: { x: 0, y: 0 },
-  left: { x: -0.2, y: 0 },
-  right: { x: 0.2, y: 0 },
-  up: { x: 0, y: -0.2 },
-  down: { x: 0, y: 0.2 },
-};
-
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const [faceDetected, setFaceDetected] = useState(false);
   const [irisOffset, setIrisOffset] = useState({ x: 0, y: 0 });
-  const [gazeData, setGazeData] = useState([]);
-  const [mode, setMode] = useState('standard');
-  const [running, setRunning] = useState(false);
-  const [currentPrompt, setCurrentPrompt] = useState(null);
-  const [results, setResults] = useState([]);
+  const [faceDetected, setFaceDetected] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -61,21 +42,14 @@ export default function EyeTrackingTest() {
       const outer = lm[33];
       const top = lm[159];
       const bottom = lm[145];
+
       const width = Math.abs(outer.x - inner.x);
       const height = Math.abs(top.y - bottom.y);
 
       const offsetX = (iris.x - inner.x) / width - 0.5;
       const offsetY = (iris.y - top.y) / height - 0.5;
 
-      const offset = { x: offsetX, y: offsetY };
-      setIrisOffset(offset);
-
-      if (running) {
-        setGazeData((prev) => [
-          ...prev,
-          { offset, time: Date.now(), prompt: currentPrompt },
-        ]);
-      }
+      setIrisOffset({ x: offsetX, y: offsetY });
 
       lm.forEach((pt) => {
         ctx.beginPath();
@@ -93,56 +67,18 @@ export default function EyeTrackingTest() {
       height: 480,
     });
 
-    camera.start();
-    return () => camera.stop();
-  }, [running, currentPrompt]);
-
-  const speak = (text) => {
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 0.9;
-    window.speechSynthesis.speak(utter);
-  };
-
-  const startTest = async () => {
-    setGazeData([]);
-    setResults([]);
-    setRunning(true);
-    for (const dir of PROMPTS) {
-      setCurrentPrompt(dir);
-      speak(`Look ${dir}`);
-      await new Promise((res) => setTimeout(res, TEST_MODES[mode].duration));
-    }
-    setRunning(false);
-    setCurrentPrompt(null);
-    summarize();
-  };
-
-  const summarize = () => {
-    const result = PROMPTS.map((dir) => {
-      const expected = OFFSETS[dir];
-      const samples = gazeData.filter((d) => d.prompt === dir);
-      const hits = samples.filter(
-        (d) =>
-          Math.abs(d.offset.x - expected.x) < 0.15 &&
-          Math.abs(d.offset.y - expected.y) < 0.15
-      );
-      return {
-        direction: dir,
-        total: samples.length,
-        hits: hits.length,
-        accuracy: samples.length
-          ? ((hits.length / samples.length) * 100).toFixed(1)
-          : '0.0',
-      };
-    });
-    setResults(result);
-  };
+    video.onloadedmetadata = () => {
+      camera.start();
+    };
+  }, []);
 
   return (
-    <div className="fixed inset-0 bg-black z-0">
+    <div className="fixed inset-0 z-0 bg-black">
       <video
         ref={videoRef}
-        className="absolute inset-0 w-full h-full object-cover"
+        width="640"
+        height="480"
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-0"
         autoPlay
         playsInline
         muted
@@ -151,49 +87,12 @@ export default function EyeTrackingTest() {
         ref={canvasRef}
         width={640}
         height={480}
-        className="absolute inset-0 w-full h-full pointer-events-none z-10"
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none"
       />
-      <div className="absolute top-4 left-4 z-20 bg-white text-black rounded p-2 text-sm">
-        <label>Mode:</label>
-        <select
-          value={mode}
-          onChange={(e) => setMode(e.target.value)}
-          className="ml-2"
-        >
-          {Object.entries(TEST_MODES).map(([key, val]) => (
-            <option key={key} value={key}>
-              {val.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="absolute top-4 right-4 z-20 text-white text-sm bg-black/60 px-3 py-2 rounded">
+      <div className="absolute top-2 left-2 z-20 bg-white/80 text-black text-sm p-2 rounded">
         Face: {faceDetected ? '✓' : '✗'}<br />
-        Offset: x={irisOffset.x.toFixed(2)} y={irisOffset.y.toFixed(2)}<br />
-        {currentPrompt && <div className="mt-1">Target: {currentPrompt}</div>}
+        x: {irisOffset.x.toFixed(2)}, y: {irisOffset.y.toFixed(2)}
       </div>
-      {!running && (
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-30">
-          <button
-            onClick={startTest}
-            className="bg-blue-600 text-white px-6 py-2 rounded shadow"
-          >
-            Start Eye Test
-          </button>
-        </div>
-      )}
-      {results.length > 0 && (
-        <div className="absolute bottom-4 right-4 z-30 bg-white text-black p-3 rounded text-sm shadow">
-          <strong>Results</strong>
-          <ul className="mt-1">
-            {results.map((r) => (
-              <li key={r.direction}>
-                {r.direction}: {r.accuracy}% ({r.hits}/{r.total})
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
