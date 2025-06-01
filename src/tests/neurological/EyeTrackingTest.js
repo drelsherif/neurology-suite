@@ -2,13 +2,27 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 
+const DIRECTIONS = ['center', 'left', 'right', 'up', 'down'];
+const OFFSETS = {
+  center: { x: 0, y: 0 },
+  left: { x: -0.2, y: 0 },
+  right: { x: 0.2, y: 0 },
+  up: { x: 0, y: -0.2 },
+  down: { x: 0, y: 0.2 },
+};
+
 export default function EyeTrackingTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const [loading, setLoading] = useState(true);
   const [faceDetected, setFaceDetected] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [irisOffset, setIrisOffset] = useState({ x: 0, y: 0 });
-  const [gazeHistory, setGazeHistory] = useState([]);
+  const [gazeData, setGazeData] = useState([]);
+  const [currentPhase, setCurrentPhase] = useState(0);
+  const [testRunning, setTestRunning] = useState(false);
+  const [results, setResults] = useState(null);
+
+  const PHASE_DURATION = 3000;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -31,33 +45,35 @@ export default function EyeTrackingTest() {
     faceMesh.onResults((results) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+      if (results.multiFaceLandmarks?.length) {
         setFaceDetected(true);
         const lm = results.multiFaceLandmarks[0];
 
-        // Draw face mesh
+        const iris = lm[468];
+        const eyeInner = lm[133];
+        const eyeOuter = lm[33];
+        const eyeTop = lm[159];
+        const eyeBottom = lm[145];
+
+        const width = Math.abs(eyeOuter.x - eyeInner.x);
+        const height = Math.abs(eyeTop.y - eyeBottom.y);
+
+        const offsetX = (iris.x - eyeInner.x) / width - 0.5;
+        const offsetY = (iris.y - eyeTop.y) / height - 0.5;
+
+        const offset = { x: offsetX, y: offsetY };
+        setIrisOffset(offset);
+
+        if (testRunning) {
+          setGazeData(prev => [...prev, { offset, timestamp: Date.now(), direction: DIRECTIONS[currentPhase] }]);
+        }
+
         lm.forEach(pt => {
           ctx.beginPath();
           ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 2, 0, 2 * Math.PI);
           ctx.fillStyle = 'lime';
           ctx.fill();
         });
-
-        // Head-anchored gaze tracking
-        const leftIris = lm[468];
-        const leftEyeInner = lm[133];
-        const leftEyeOuter = lm[33];
-        const leftEyeTop = lm[159];
-        const leftEyeBottom = lm[145];
-
-        const widthNorm = Math.abs(leftEyeOuter.x - leftEyeInner.x);
-        const heightNorm = Math.abs(leftEyeTop.y - leftEyeBottom.y);
-
-        const offsetX = (leftIris.x - leftEyeInner.x) / widthNorm - 0.5;
-        const offsetY = (leftIris.y - leftEyeTop.y) / heightNorm - 0.5;
-
-        setIrisOffset({ x: offsetX, y: offsetY });
-        setGazeHistory(prev => [...prev.slice(-100), { x: offsetX, y: offsetY }]);
       } else {
         setFaceDetected(false);
       }
@@ -74,35 +90,37 @@ export default function EyeTrackingTest() {
     });
 
     camera.start();
+    return () => camera.stop();
+  }, [testRunning, currentPhase]);
 
-    return () => {
-      camera.stop();
-    };
-  }, []);
+  const runTest = async () => {
+    setGazeData([]);
+    setResults(null);
+    setTestRunning(true);
+    for (let i = 0; i < DIRECTIONS.length; i++) {
+      setCurrentPhase(i);
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(DIRECTIONS[i]));
+      await new Promise(res => setTimeout(res, PHASE_DURATION));
+    }
+    setTestRunning(false);
+    calculateResults();
+  };
 
-  const renderGazeGraph = () => {
-    const width = 300;
-    const height = 100;
-    const xMid = width / 2;
-    const yMid = height / 2;
-
-    const points = gazeHistory.map((pt, i) => {
-      const x = xMid + pt.x * 100;
-      const y = yMid + pt.y * 50;
-      return `${x},${y}`;
-    }).join(' L ');
-
-    return (
-      <svg width={width} height={height} className="border border-gray-300 bg-white mt-2">
-        <polyline
-          fill="none"
-          stroke="blue"
-          strokeWidth="2"
-          points={points ? `M ${points}` : ''}
-        />
-        <circle cx={xMid} cy={yMid} r="3" fill="red" />
-      </svg>
-    );
+  const calculateResults = () => {
+    const summary = DIRECTIONS.map(dir => {
+      const target = OFFSETS[dir];
+      const samples = gazeData.filter(d => d.direction === dir);
+      const withinThreshold = samples.filter(d =>
+        Math.abs(d.offset.x - target.x) < 0.15 && Math.abs(d.offset.y - target.y) < 0.15
+      );
+      return {
+        direction: dir,
+        attempts: samples.length,
+        hits: withinThreshold.length,
+        accuracy: samples.length ? (withinThreshold.length / samples.length * 100).toFixed(1) : '0.0'
+      };
+    });
+    setResults(summary);
   };
 
   return (
@@ -120,11 +138,30 @@ export default function EyeTrackingTest() {
         height={480}
         className="absolute inset-0 w-full h-full z-10 pointer-events-none"
       />
-      <div className="absolute top-2 left-2 z-20 text-white bg-black/60 text-sm px-2 py-1 rounded">
-        {loading ? 'Loading FaceMesh...' : faceDetected ? 'Face ✓' : 'Face ✗'}<br />
-        Offset: x={irisOffset.x.toFixed(2)} y={irisOffset.y.toFixed(2)}
+      <div className="absolute top-2 left-2 z-20 bg-black/60 text-white text-sm px-3 py-2 rounded">
+        {loading ? 'Loading...' : faceDetected ? 'Face ✓' : 'Face ✗'}<br />
+        Offset: x={irisOffset.x.toFixed(2)} y={irisOffset.y.toFixed(2)}<br />
+        {testRunning && }
       </div>
-      <div className="z-30 relative flex justify-center">{renderGazeGraph()}</div>
+      <div className="absolute bottom-4 left-4 z-30">
+        {!testRunning && (
+          <button onClick={runTest} className="bg-blue-600 text-white px-4 py-2 rounded shadow">
+            Start Eye Test
+          </button>
+        )}
+      </div>
+      {results && (
+        <div className="absolute bottom-4 right-4 z-30 text-sm bg-white/90 p-3 rounded text-black">
+          <strong>Test Results</strong>
+          <ul>
+            {results.map(r => (
+              <li key={r.direction}>
+                {r.direction}: {r.accuracy}% ({r.hits}/{r.attempts})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
