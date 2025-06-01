@@ -183,25 +183,25 @@ export default function FingerTapTest({ onBack }) {
     }
   };
 
-  // Adjust sensitivity - Mobile-friendly defaults
+  // Adjust sensitivity - iPhone/Mobile optimized
   const adjustSensitivity = useCallback((sens) => {
     switch (sens) {
       case 'low':
-        tapThreshold.current = 20; // Lower for mobile
+        tapThreshold.current = 8; // Very sensitive for iPhone
         minTapInterval.current = 200;
         break;
       case 'high':
-        tapThreshold.current = 8; // Much lower for mobile
+        tapThreshold.current = 3; // Extremely sensitive
         minTapInterval.current = 100;
         break;
       default: // normal
-        tapThreshold.current = 15; // Lower than original 25
+        tapThreshold.current = 5; // Much more sensitive than before
         minTapInterval.current = 150;
     }
-    console.log(`🎯 Sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
+    console.log(`🎯 Mobile sensitivity adjusted: threshold=${tapThreshold.current}px, interval=${minTapInterval.current}ms`);
   }, []);
 
-  // Tap detection logic - Fixed with refs to avoid stale closures
+  // Tap detection logic - iPhone optimized
   const detectTap = useCallback((landmarks) => {
     if (!isRunning || !canvasRef.current) return;
     
@@ -221,59 +221,69 @@ export default function FingerTapTest({ onBack }) {
       const movement = tipY - lastFingerTipY.current;
       const currentTime = Date.now();
       
-      console.log(`👆 Finger movement: ${movement.toFixed(1)}px, threshold: ${tapThreshold.current}px, curvature: ${fingerCurvature.toFixed(1)}`);
+      // More lenient detection for iPhone
+      const isDownwardMovement = movement > tapThreshold.current;
+      const isTimingOk = currentTime - lastTapTime.current > minTapInterval.current;
+      const isFingerExtended = fingerCurvature < 60; // More lenient
       
-      if (movement > tapThreshold.current && 
-          fingerCurvature < 40 && 
-          currentTime - lastTapTime.current > minTapInterval.current) {
-        
+      console.log(`📱 iPhone tap check: movement=${movement.toFixed(1)}px (need >${tapThreshold.current}), curvature=${fingerCurvature.toFixed(1)} (need <60), timing=${isTimingOk}`);
+      
+      if (isDownwardMovement && isFingerExtended && isTimingOk) {
         lastTapTime.current = currentTime;
         
-        console.log('🎉 TAP DETECTED!');
+        console.log('🎉 TAP DETECTED ON iPHONE!');
         
         // Use functional updates to avoid stale closure issues
         setTapCount(prevCount => {
           const newCount = prevCount + 1;
-          console.log('📊 Updated tap count:', newCount);
+          console.log('📊 iPhone tap count updated:', newCount);
           return newCount;
         });
         
         setTapTimes(prevTimes => {
           const newTimes = [...prevTimes, currentTime];
-          console.log('⏰ Updated tap times:', newTimes.length);
+          console.log('⏰ iPhone tap times updated:', newTimes.length);
           return newTimes;
         });
         
-        // Visual feedback
+        // Enhanced visual feedback for iPhone
         flashFingerTip(indexTip);
       }
     }
     
     lastFingerTipY.current = tipY;
-  }, [isRunning]); // Remove tapCount from dependencies
+  }, [isRunning]);
 
   const flashFingerTip = (indexTip) => {
     if (!canvasRef.current) return;
     
-    console.log('💥 Flash effect triggered!');
+    console.log('💥 iPhone flash effect triggered!');
     
     const ctx = canvasRef.current.getContext('2d');
     const x = indexTip.x * canvasRef.current.width;
     const y = indexTip.y * canvasRef.current.height;
     
+    // Much more visible flash for iPhone
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, 30, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+    ctx.arc(x, y, 40, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.95)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 0, 0, 1)';
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 8;
     ctx.stroke();
+    
+    // Add second ring
+    ctx.beginPath();
+    ctx.arc(x, y, 55, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    
     ctx.restore();
     
-    // Clear flash after delay - but it will be cleared on next frame anyway
     setTimeout(() => {
-      console.log('Flash effect cleared');
+      console.log('iPhone flash effect cleared');
     }, 100);
   };
 
