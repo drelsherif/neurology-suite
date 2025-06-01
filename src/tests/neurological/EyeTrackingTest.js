@@ -76,11 +76,12 @@ export default function EyeTrackingTest({ onBack }) {
         width={640}
         height={480}
       />
-      <div className="absolute top-2 left-2 z-30 bg-black bg-opacity-60 text-white p-2 rounded shadow">
-        <p>Face detected: {faceDetected ? '✅' : '❌'}</p>
-        <p>Gaze: {gazeDirection}</p>
-        <p>Blink: {blinkDetected ? 'Yes' : 'No'}</p>
-      </div>
+      <div className="absolute top-2 left-2 z-30 bg-black bg-opacity-60 text-white p-2 rounded shadow text-sm leading-snug">
+  <p>Face detected: {faceDetected ? '✓' : 'X'}</p>
+  <p>Gaze: {gazeDirection}</p>
+  <p>Blink: {blinkDetected ? 'Yes' : 'No'}</p>
+</div>
+
     </div>
   );
 }
