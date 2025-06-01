@@ -11,17 +11,22 @@ export default function EyeTrackingTest({ onBack }) {
   const [gazeDirection, setGazeDirection] = useState('center');
   const [blinkDetected, setBlinkDetected] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const videoElement = videoRef.current;
     const canvasElement = canvasRef.current;
     const canvasCtx = canvasElement.getContext('2d');
 
+    console.log('[🟡] Initializing MediaPipe...');
     const faceMesh = getFaceMesh();
     faceMeshRef.current = faceMesh;
 
     faceMesh.onResults((results) => {
-      if (!canvasElement || !results.multiFaceLandmarks) {
+      console.log('[🟢] MediaPipe received results:', results);
+      setLoading(false);
+
+      if (!canvasElement || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
         setFaceDetected(false);
         return;
       }
@@ -56,7 +61,7 @@ export default function EyeTrackingTest({ onBack }) {
   }, []);
 
   return (
-    <div className="relative w-full max-w-lg mx-auto aspect-video bg-black rounded-lg overflow-hidden">
+    <div className="relative w-full h-[50vh] mx-auto bg-black rounded-lg overflow-hidden">
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-cover z-0"
@@ -77,11 +82,11 @@ export default function EyeTrackingTest({ onBack }) {
         height={480}
       />
       <div className="absolute top-2 left-2 z-30 bg-black bg-opacity-60 text-white p-2 rounded shadow text-sm leading-snug">
-  <p>Face detected: {faceDetected ? '✓' : 'X'}</p>
-  <p>Gaze: {gazeDirection}</p>
-  <p>Blink: {blinkDetected ? 'Yes' : 'No'}</p>
-</div>
-
+        <p>Face detected: {faceDetected ? '✓' : 'X'}</p>
+        <p>Gaze: {gazeDirection}</p>
+        <p>Blink: {blinkDetected ? 'Yes' : 'No'}</p>
+        {loading && <p className="text-yellow-400">Loading MediaPipe...</p>}
+      </div>
     </div>
   );
 }
