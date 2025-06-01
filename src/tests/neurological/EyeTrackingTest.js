@@ -45,7 +45,10 @@ export default function EyeTrackingTest() {
       setFaceDetected(true);
       const lm = results.multiFaceLandmarks[0];
 
-      const anchor = lm[1]; // Nose tip
+      const anchor = {
+        x: (left.raw.x + right.raw.x) / 2,
+        y: (left.raw.y + right.raw.y) / 2
+      };
       const anchorX = anchor.x * canvas.width;
       const anchorY = anchor.y * canvas.height;
 
@@ -64,8 +67,8 @@ export default function EyeTrackingTest() {
         const width = Math.abs(outer.x - inner.x);
         const height = Math.abs(top.y - bottom.y);
         return {
-          x: (iris.x - inner.x) / width - 0.5,
-          y: (iris.y - top.y) / height - 0.5,
+          x: width > 0.01 ? (iris.x - inner.x) / width - 0.5 : 0,
+          y: height > 0.01 ? (iris.y - top.y) / height - 0.5 : 0,
           raw: iris
         };
       };
@@ -106,8 +109,11 @@ export default function EyeTrackingTest() {
         const rx = right.raw.x * canvas.width;
         const ry = right.raw.y * canvas.height;
 
-        const boxX = Math.min(lx, rx) - 40;
-        const boxY = Math.min(ly, ry) - 40;
+        const centerX = (lx + rx) / 2;
+        const centerY = (ly + ry) / 2;
+        const boxW = 120, boxH = 80;
+        const boxX = Math.max(0, Math.min(canvas.width - boxW, centerX - boxW / 2));
+        const boxY = Math.max(0, Math.min(canvas.height - boxH, centerY - boxH / 2));
         const boxW = Math.abs(rx - lx) + 80;
         const boxH = Math.abs(ry - ly) + 80;
 
